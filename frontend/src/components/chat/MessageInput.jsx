@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Send } from "lucide-react";
+import { Send, Smile, Paperclip } from "lucide-react";
 import API from "../../services/api";
 
 function MessageInput({ activeChat, selectedUser, onMessageSent, socket }) {
@@ -8,12 +8,12 @@ function MessageInput({ activeChat, selectedUser, onMessageSent, socket }) {
 
   const handleTyping = (value) => {
     setText(value);
-
-    if (!selectedUser) return;
+    if (!selectedUser || !activeChat) return;
 
     socket?.emit("typing", {
       receiverId: selectedUser._id,
       senderName: user.username,
+      chatId: activeChat._id,
     });
 
     clearTimeout(window.typingTimeout);
@@ -21,6 +21,7 @@ function MessageInput({ activeChat, selectedUser, onMessageSent, socket }) {
     window.typingTimeout = setTimeout(() => {
       socket?.emit("stopTyping", {
         receiverId: selectedUser._id,
+        chatId: activeChat._id,
       });
     }, 1000);
   };
@@ -38,9 +39,10 @@ function MessageInput({ activeChat, selectedUser, onMessageSent, socket }) {
 
       onMessageSent(res.data);
       setText("");
-     
+
       socket?.emit("stopTyping", {
         receiverId: selectedUser._id,
+        chatId: activeChat._id,
       });
     } catch (error) {
       console.log("Send message error:", error);
@@ -49,15 +51,18 @@ function MessageInput({ activeChat, selectedUser, onMessageSent, socket }) {
 
   return (
     <div className="message-input">
+      <button className="input-action"><Smile size={20} /></button>
+      <button className="input-action"><Paperclip size={20} /></button>
+
       <input
         type="text"
-        placeholder="Type a message..."
+        placeholder="Write a message..."
         value={text}
         onChange={(e) => handleTyping(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && sendMessage()}
       />
 
-      <button onClick={sendMessage}>
+      <button className="send-button" onClick={sendMessage}>
         <Send size={18} />
       </button>
     </div>

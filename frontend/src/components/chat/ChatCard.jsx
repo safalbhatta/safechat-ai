@@ -16,7 +16,7 @@ function ChatCard({ chat, selectedUser, setSelectedUser, setActiveChat, isOnline
   };
 
   return (
-    <div
+    <button
       className={selectedUser?._id === chat._id ? "chat-card active-chat" : "chat-card"}
       onClick={handleClick}
     >
@@ -26,10 +26,13 @@ function ChatCard({ chat, selectedUser, setSelectedUser, setActiveChat, isOnline
       </div>
 
       <div className="chat-details">
-        <h4>{chat.username}</h4>
-        <p>{isOnline ? "Online" : "Offline"}</p>
+        <div className="chat-row">
+          <h4>{chat.username}</h4>
+          <small>{isOnline ? "Online" : "Offline"}</small>
+        </div>
+        <p>{chat.email}</p>
       </div>
-    </div>
+    </button>
   );
 }
 
