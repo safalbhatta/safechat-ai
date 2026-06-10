@@ -7,25 +7,97 @@ const messageSchema = new mongoose.Schema(
       ref: "Chat",
       required: true,
     },
+
     senderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
+
     receiverId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
+
     text: {
       type: String,
       required: true,
+      trim: true,
     },
-    category: {
+
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
+
+    editedAt: {
+      type: Date,
+      default: null,
+    },
+
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+
+    isFlagged: {
+      type: Boolean,
+      default: false,
+    },
+
+    flagCategory: {
       type: String,
-      enum: ["Normal", "Spam", "Abusive", "Hateful"],
-      default: "Normal",
+      enum: [
+        "None",
+        "Spam",
+        "Harassment",
+        "Hate Speech",
+        "Threat",
+        "Scam",
+        "Other",
+      ],
+      default: "None",
     },
+
+    flagReason: {
+      type: String,
+      default: "",
+    },
+
+    flagStatus: {
+      type: String,
+      enum: ["None", "Pending", "Reviewed", "Dismissed"],
+      default: "None",
+    },
+
+    flaggedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    flaggedAt: {
+      type: Date,
+      default: null,
+    },
+
+    reviewedAt: {
+      type: Date,
+      default: null,
+    },
+
     isViewed: {
       type: Boolean,
       default: false,

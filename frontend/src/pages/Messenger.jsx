@@ -4,12 +4,17 @@ import { io } from "socket.io-client";
 import Sidebar from "../components/layout/Sidebar";
 import ChatList from "../components/chat/ChatList";
 import ChatWindow from "../components/chat/ChatWindow";
+import ProfileModal from "../components/user/ProfileModal";
+import ModerationDashboard from "../components/moderation/ModerationDashboard";
 
 function Messenger() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [activeChat, setActiveChat] = useState(null);
   const [socket, setSocket] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [latestMessage, setLatestMessage] = useState(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showModerationDashboard, setShowModerationDashboard] = useState(false);
 
   const user = JSON.parse(localStorage.getItem("user"));
 
@@ -32,23 +37,46 @@ function Messenger() {
     };
   }, [user?._id]);
 
+  const handleChatActivity = (message) => {
+    setLatestMessage({
+      ...message,
+      eventId: Date.now(),
+    });
+  };
+
   return (
-    <div className="app-container">
-      <Sidebar />
+    <div className="messenger-page">
+      <div className="messenger-shell">
+        <Sidebar
+          onOpenProfile={() => setShowProfileModal(true)}
+          onOpenModeration={() => setShowModerationDashboard(true)}
+        />
 
-      <ChatList
-        selectedUser={selectedUser}
-        setSelectedUser={setSelectedUser}
-        setActiveChat={setActiveChat}
-        onlineUsers={onlineUsers}
-      />
+        <ChatList
+          selectedUser={selectedUser}
+          setSelectedUser={setSelectedUser}
+          activeChat={activeChat}
+          setActiveChat={setActiveChat}
+          onlineUsers={onlineUsers}
+          latestMessage={latestMessage}
+        />
 
-      <ChatWindow
-        selectedUser={selectedUser}
-        activeChat={activeChat}
-        socket={socket}
-        onlineUsers={onlineUsers}
-      />
+        <ChatWindow
+          selectedUser={selectedUser}
+          activeChat={activeChat}
+          socket={socket}
+          onlineUsers={onlineUsers}
+          onChatActivity={handleChatActivity}
+        />
+      </div>
+
+      {showProfileModal && (
+        <ProfileModal onClose={() => setShowProfileModal(false)} />
+      )}
+
+      {showModerationDashboard && (
+        <ModerationDashboard onClose={() => setShowModerationDashboard(false)} />
+      )}
     </div>
   );
 }

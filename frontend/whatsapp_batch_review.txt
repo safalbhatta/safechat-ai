@@ -1,3 +1,422 @@
+
+
+==================== src\components\chat\MessageBubble.jsx ====================
+
+import { useState } from "react";
+import { Check, CheckCheck, Flag, X } from "lucide-react";
+import API from "../../services/api";
+
+function MessageBubble({ message }) {
+  const user = JSON.parse(localStorage.getItem("user"));
+  const isMe = message.senderId === user?._id;
+
+  const [localMessage, setLocalMessage] = useState(message);
+  const [showFlagBox, setShowFlagBox] = useState(false);
+  const [flagCategory, setFlagCategory] = useState("Spam");
+  const [flagReason, setFlagReason] = useState("");
+
+  const isFlagged = localMessage.isFlagged === true;
+
+  const formatMessageTime = (date) => {
+    if (!date) return "";
+
+    return new Date(date).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const submitFlag = async () => {
+    try {
+      const res = await API.patch(`/messages/${localMessage._id}/flag`, {
+        flagCategory,
+        flagReason,
+      });
+
+      setLocalMessage(res.data);
+      setShowFlagBox(false);
+      setFlagReason("");
+    } catch (error) {
+      console.log("Flag message error:", error);
+    }
+  };
+
+  return (
+    <div className={`message-row ${isMe ? "message-row-sent" : "message-row-received"}`}>
+      <div className={`message-stack ${isMe ? "message-stack-sent" : ""}`}>
+        {isFlagged && (
+          <div className="manual-flag-badge">
+            <Flag size={13} />
+            Flagged: {localMessage.flagCategory}
+          </div>
+        )}
+
+        <div className={`message ${isMe ? "sent" : "received"} ${isFlagged ? "flagged-message" : ""}`}>
+          <span className="message-text">{localMessage.text}</span>
+
+          {isFlagged && localMessage.flagReason && (
+            <span className="inline-flag-reason">
+              Reason: {localMessage.flagReason}
+            </span>
+          )}
+
+          <div className="message-footer">
+            <span className="message-time">
+              {formatMessageTime(localMessage.createdAt)}
+            </span>
+
+            {isMe && (
+              <span className={localMessage.isViewed ? "message-status seen" : "message-status"}>
+                {localMessage.isViewed ? <CheckCheck size={15} /> : <Check size={15} />}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {!isFlagged && (
+          <button
+            className="flag-message-btn"
+            onClick={() => setShowFlagBox(true)}
+            type="button"
+          >
+            <Flag size={13} />
+            Flag
+          </button>
+        )}
+
+        {showFlagBox && (
+          <div className="flag-box">
+            <div className="flag-box-header">
+              <strong>Flag this message</strong>
+
+              <button onClick={() => setShowFlagBox(false)} type="button">
+                <X size={15} />
+              </button>
+            </div>
+
+            <select
+              value={flagCategory}
+              onChange={(e) => setFlagCategory(e.target.value)}
+            >
+              <option value="Spam">Spam</option>
+              <option value="Harassment">Harassment</option>
+              <option value="Hate Speech">Hate Speech</option>
+              <option value="Threat">Threat</option>
+              <option value="Scam">Scam</option>
+              <option value="Other">Other</option>
+            </select>
+
+            <textarea
+              placeholder="Optional reason..."
+              value={flagReason}
+              onChange={(e) => setFlagReason(e.target.value)}
+            />
+
+            <button className="submit-flag-btn" onClick={submitFlag} type="button">
+              Submit Flag
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default MessageBubble;
+
+
+==================== src\components\chat\ChatWindow.jsx ====================
+
+import { useEffect, useRef, useState } from "react";
+import { ShieldCheck } from "lucide-react";
+import MessageBubble from "./MessageBubble";
+import MessageInput from "./MessageInput";
+import API from "../../services/api";
+
+function ChatWindow({
+  selectedUser,
+  activeChat,
+  socket,
+  onlineUsers,
+  onChatActivity,
+}) {
+  const [messages, setMessages] = useState([]);
+  const [typingUser, setTypingUser] = useState("");
+  const bottomRef = useRef(null);
+
+  const currentUser = JSON.parse(localStorage.getItem("user"));
+  const isSelectedUserOnline = selectedUser
+    ? onlineUsers.includes(selectedUser._id)
+    : false;
+
+  useEffect(() => {
+    setTypingUser("");
+
+    if (activeChat?._id) {
+      fetchMessages();
+    } else {
+      setMessages([]);
+    }
+  }, [activeChat?._id]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, typingUser]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleReceiveMessage = (message) => {
+      onChatActivity?.(message);
+
+      if (message.chatId === activeChat?._id) {
+        setMessages((prev) => {
+          const exists = prev.some((m) => m._id === message._id);
+          return exists ? prev : [...prev, message];
+        });
+
+        socket.emit("messagesSeen", {
+          receiverId: message.senderId,
+          chatId: message.chatId,
+        });
+      }
+    };
+
+    const handleMessagesSeen = ({ chatId }) => {
+      if (chatId === activeChat?._id) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.senderId === currentUser?._id ? { ...msg, isViewed: true } : msg
+          )
+        );
+      }
+    };
+
+    const handleTyping = ({ senderName, chatId }) => {
+      if (chatId === activeChat?._id) {
+        setTypingUser(senderName);
+      }
+    };
+
+    const handleStopTyping = ({ chatId }) => {
+      if (chatId === activeChat?._id) {
+        setTypingUser("");
+      }
+    };
+
+    socket.on("receiveMessage", handleReceiveMessage);
+    socket.on("messagesSeen", handleMessagesSeen);
+    socket.on("typing", handleTyping);
+    socket.on("stopTyping", handleStopTyping);
+
+    return () => {
+      socket.off("receiveMessage", handleReceiveMessage);
+      socket.off("messagesSeen", handleMessagesSeen);
+      socket.off("typing", handleTyping);
+      socket.off("stopTyping", handleStopTyping);
+    };
+  }, [socket, activeChat?._id, currentUser?._id, onChatActivity]);
+
+  const fetchMessages = async () => {
+    try {
+      const res = await API.get(`/messages/${activeChat._id}`);
+      setMessages(res.data);
+
+      const hasUnseenReceivedMessages = res.data.some(
+        (msg) => msg.receiverId === currentUser?._id && !msg.isViewed
+      );
+
+      if (hasUnseenReceivedMessages && selectedUser?._id) {
+        socket?.emit("messagesSeen", {
+          receiverId: selectedUser._id,
+          chatId: activeChat._id,
+        });
+      }
+    } catch (error) {
+      console.log("Fetch messages error:", error);
+    }
+  };
+
+  const handleMessageSent = (newMessage) => {
+    setMessages((prev) => [...prev, newMessage]);
+    onChatActivity?.(newMessage);
+
+    socket?.emit("sendMessage", {
+      receiverId: selectedUser._id,
+      message: newMessage,
+    });
+
+    socket?.emit("stopTyping", {
+      receiverId: selectedUser._id,
+      chatId: activeChat._id,
+    });
+  };
+
+  if (!selectedUser) {
+    return (
+      <section className="chat-window empty-chat">
+        <div className="empty-chat-card">
+          <div className="empty-chat-icon">
+            <ShieldCheck size={34} />
+          </div>
+          <h2>Welcome to SafeChat AI</h2>
+          <p>Select a user to start a secure real-time conversation.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="chat-window">
+      <div className="chat-header">
+        <div className="chat-user">
+          <div className="avatar-wrapper">
+            <div className="avatar">
+              {selectedUser.username?.charAt(0)?.toUpperCase()}
+            </div>
+            <span
+              className={
+                isSelectedUserOnline ? "status-dot online" : "status-dot offline"
+              }
+            />
+          </div>
+
+          <div>
+            <h3>{selectedUser.username}</h3>
+            <p>{isSelectedUserOnline ? "Online now" : selectedUser.email}</p>
+          </div>
+        </div>
+
+        <div className="chat-header-actions">
+          <div className="chat-security">
+            <ShieldCheck size={16} />
+            Protected
+          </div>
+        </div>
+      </div>
+
+      <div className="messages-area">
+        {messages.length === 0 ? (
+          <div className="empty-messages">
+            No messages yet. Start the conversation.
+          </div>
+        ) : (
+          messages.map((msg) => <MessageBubble key={msg._id} message={msg} />)
+        )}
+
+        {typingUser && (
+          <div className="typing-indicator">
+            <div className="typing-bubble">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      <MessageInput
+        activeChat={activeChat}
+        selectedUser={selectedUser}
+        onMessageSent={handleMessageSent}
+        socket={socket}
+      />
+    </section>
+  );
+}
+
+export default ChatWindow;
+
+
+==================== src\components\chat\MessageInput.jsx ====================
+
+import { useRef, useState } from "react";
+import { Send, Smile, Paperclip } from "lucide-react";
+import API from "../../services/api";
+
+function MessageInput({ activeChat, selectedUser, onMessageSent, socket }) {
+  const [text, setText] = useState("");
+  const typingTimeoutRef = useRef(null);
+  const user = JSON.parse(localStorage.getItem("user"));
+
+  const handleTyping = (value) => {
+    setText(value);
+
+    if (!selectedUser || !activeChat || !socket) return;
+
+    socket.emit("typing", {
+      receiverId: selectedUser._id,
+      senderName: user?.username,
+      chatId: activeChat._id,
+    });
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit("stopTyping", {
+        receiverId: selectedUser._id,
+        chatId: activeChat._id,
+      });
+    }, 1000);
+  };
+
+  const sendMessage = async () => {
+    if (!text.trim()) return;
+    if (!activeChat || !selectedUser) return;
+
+    try {
+      const res = await API.post("/messages", {
+        chatId: activeChat._id,
+        receiverId: selectedUser._id,
+        text: text.trim(),
+      });
+
+      onMessageSent(res.data);
+      setText("");
+
+      socket?.emit("stopTyping", {
+        receiverId: selectedUser._id,
+        chatId: activeChat._id,
+      });
+    } catch (error) {
+      console.log("Send message error:", error);
+    }
+  };
+
+  return (
+    <div className="message-input">
+      <button className="input-action" type="button">
+        <Smile size={20} />
+      </button>
+
+      <button className="input-action" type="button">
+        <Paperclip size={20} />
+      </button>
+
+      <input
+        type="text"
+        placeholder="Write a secure message..."
+        value={text}
+        onChange={(e) => handleTyping(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+      />
+
+      <button className="send-button" type="button" onClick={sendMessage}>
+        <Send size={18} />
+      </button>
+    </div>
+  );
+}
+
+export default MessageInput;
+
+
+==================== src\App.css ====================
+
 * {
   margin: 0;
   padding: 0;
@@ -1218,376 +1637,354 @@ body {
 .moderation-card.dismissed h3 {
   color: #94a3b8;
 }
-.message-input-shell {
-  background: rgba(15, 23, 42, 0.96);
-  border-top: 1px solid rgba(148, 163, 184, 0.14);
-}
 
-.message-input-shell .message-input {
-  border-top: none;
-}
 
-.reply-preview {
-  margin: 12px 20px 0;
-  padding: 10px 12px;
-  border-radius: 16px;
-  background: rgba(30, 41, 59, 0.9);
-  border-left: 3px solid #a78bfa;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
+==================== ..\backend\models\Message.js ====================
 
-.reply-preview strong {
-  display: block;
-  color: #c4b5fd;
-  font-size: 12px;
-  margin-bottom: 3px;
-}
+const mongoose = require("mongoose");
 
-.reply-preview p {
-  color: #cbd5e1;
-  font-size: 13px;
-  max-width: 520px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+const messageSchema = new mongoose.Schema(
+  {
+    chatId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Chat",
+      required: true,
+    },
 
-.reply-preview button {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 10px;
-  background: rgba(15, 23, 42, 0.9);
-  color: #94a3b8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
+    senderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
 
-.message-action-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
+    receiverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
 
-.message-row-sent .message-action-wrapper {
-  flex-direction: row-reverse;
-}
+    text: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
-.message-more-btn {
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 999px;
-  background: rgba(30, 41, 59, 0.85);
-  color: #94a3b8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: 0.15s;
-}
+    isFlagged: {
+      type: Boolean,
+      default: false,
+    },
 
-.message-action-wrapper:hover .message-more-btn {
-  opacity: 1;
-}
+    flagCategory: {
+      type: String,
+      enum: [
+        "None",
+        "Spam",
+        "Harassment",
+        "Hate Speech",
+        "Threat",
+        "Scam",
+        "Other",
+      ],
+      default: "None",
+    },
 
-.message-more-btn:hover {
-  background: rgba(124, 58, 237, 0.2);
-  color: #c4b5fd;
-}
+    flagReason: {
+      type: String,
+      default: "",
+    },
 
-.message-actions {
-  position: absolute;
-  top: 34px;
-  left: 0;
-  z-index: 20;
-  width: 150px;
-  padding: 7px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.98);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-}
+    flagStatus: {
+      type: String,
+      enum: ["None", "Pending", "Reviewed", "Dismissed"],
+      default: "None",
+    },
 
-.sent-actions {
-  left: auto;
-  right: 0;
-}
+    flaggedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
 
-.message-actions button {
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: #cbd5e1;
-  padding: 9px 10px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-}
+    flaggedAt: {
+      type: Date,
+      default: null,
+    },
 
-.message-actions button:hover {
-  background: rgba(124, 58, 237, 0.16);
-  color: #f8fafc;
-}
+    reviewedAt: {
+      type: Date,
+      default: null,
+    },
 
-.message-reply-preview {
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 12px;
-  background: rgba(2, 6, 23, 0.22);
-  border-left: 3px solid rgba(196, 181, 253, 0.8);
-  margin-bottom: 8px;
-}
+    isViewed: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { timestamps: true }
+);
 
-.message-reply-preview strong {
-  display: block;
-  font-size: 11px;
-  color: #c4b5fd;
-  margin-bottom: 2px;
-}
+module.exports = mongoose.model("Message", messageSchema);
 
-.message-reply-preview span {
-  display: block;
-  font-size: 12px;
-  opacity: 0.84;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
-.edit-message-box {
-  width: 280px;
-}
+==================== ..\backend\controllers\messageController.js ====================
 
-.edit-message-box input {
-  width: 100%;
-  height: 38px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  outline: none;
-  background: rgba(15, 23, 42, 0.5);
-  color: #f8fafc;
-  border-radius: 12px;
-  padding: 0 10px;
-}
+const Message = require("../models/Message");
+const Chat = require("../models/Chat");
 
-.edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 8px;
-}
+const sendMessage = async (req, res) => {
+  try {
+    const { chatId, receiverId, text } = req.body;
 
-.edit-actions button {
-  border: none;
-  border-radius: 10px;
-  padding: 7px 10px;
-  cursor: pointer;
-  font-weight: 800;
-}
+    if (!chatId || !receiverId || !text) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
 
-.edit-actions button:first-child {
-  background: rgba(148, 163, 184, 0.16);
-  color: #cbd5e1;
-}
+    const message = await Message.create({
+      chatId,
+      senderId: req.user._id,
+      receiverId,
+      text,
+      isFlagged: false,
+      flagCategory: "None",
+      flagReason: "",
+      flagStatus: "None",
+      isViewed: false,
+    });
 
-.edit-actions button:last-child {
-  background: rgba(124, 58, 237, 0.24);
-  color: #ddd6fe;
-}
+    await Chat.findByIdAndUpdate(chatId, {
+      lastMessage: text,
+    });
 
-.edited-label {
-  font-size: 10px;
-  opacity: 0.65;
-  white-space: nowrap;
-}
+    res.status(201).json(message);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
-.deleted-message {
-  opacity: 0.72;
-  font-style: italic;
-}
+const getMessages = async (req, res) => {
+  try {
+    const chatId = req.params.chatId;
+    const currentUserId = req.user._id;
 
-.message-row-sent .flag-box {
-  align-self: flex-end;
-}
-.messages-area-wrapper {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-}
+    await Message.updateMany(
+      {
+        chatId,
+        receiverId: currentUserId,
+        isViewed: false,
+      },
+      {
+        isViewed: true,
+      }
+    );
 
-.messages-area-wrapper .messages-area {
-  height: 100%;
-}
+    const messages = await Message.find({ chatId }).sort({
+      createdAt: 1,
+    });
 
-.date-separator {
-  display: flex;
-  justify-content: center;
-  margin: 14px 0;
-}
+    res.json(messages);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
-.date-separator span {
-  padding: 7px 13px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.88);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  color: #cbd5e1;
-  font-size: 12px;
-  font-weight: 800;
-}
+const flagMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { flagCategory, flagReason } = req.body;
 
-.scroll-bottom-btn {
-  position: absolute;
-  right: 22px;
-  bottom: 18px;
-  width: 46px;
-  height: 46px;
-  border: none;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #7c3aed, #2563eb);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 18px 45px rgba(37, 99, 235, 0.3);
-  cursor: pointer;
-  z-index: 15;
-}
+    if (!flagCategory || flagCategory === "None") {
+      return res.status(400).json({ message: "Flag category is required" });
+    }
 
-.new-message-count {
-  position: absolute;
-  top: -8px;
-  right: -6px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: #ef4444;
-  color: white;
-  font-size: 11px;
-  font-weight: 900;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.chat-filter-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 14px;
-}
+    const allowedCategories = [
+      "Spam",
+      "Harassment",
+      "Hate Speech",
+      "Threat",
+      "Scam",
+      "Other",
+    ];
 
-.chat-filter {
-  height: 36px;
-  border: none;
-  border-radius: 13px;
-  background: rgba(30, 41, 59, 0.72);
-  color: #94a3b8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
+    if (!allowedCategories.includes(flagCategory)) {
+      return res.status(400).json({ message: "Invalid flag category" });
+    }
 
-.chat-filter.active,
-.chat-filter:hover {
-  background: rgba(124, 58, 237, 0.18);
-  color: #c4b5fd;
-}
+    const message = await Message.findById(messageId);
 
-.chat-name-row {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
 
-.chat-name-row h4 {
-  min-width: 0;
-}
+    const currentUserId = req.user._id.toString();
 
-.chat-mini-icon {
-  color: #a78bfa;
-  flex-shrink: 0;
-}
+    const isSender = message.senderId.toString() === currentUserId;
+    const isReceiver = message.receiverId.toString() === currentUserId;
 
-.chat-more-btn {
-  width: 25px;
-  height: 25px;
-  border: none;
-  border-radius: 9px;
-  background: transparent;
-  color: #64748b;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
+    if (!isSender && !isReceiver) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
 
-.chat-card:hover .chat-more-btn {
-  color: #c4b5fd;
-}
+    message.isFlagged = true;
+    message.flagCategory = flagCategory;
+    message.flagReason = flagReason || "";
+    message.flagStatus = "Pending";
+    message.flaggedBy = req.user._id;
+    message.flaggedAt = new Date();
 
-.chat-more-btn:hover {
-  background: rgba(124, 58, 237, 0.18);
-}
+    await message.save();
 
-.chat-details {
-  position: relative;
-}
+    const updatedMessage = await Message.findById(message._id)
+      .populate("senderId", "username email")
+      .populate("receiverId", "username email")
+      .populate("flaggedBy", "username email");
 
-.chat-action-menu {
-  position: absolute;
-  top: 34px;
-  right: 0;
-  width: 178px;
-  padding: 7px;
-  border-radius: 15px;
-  background: rgba(15, 23, 42, 0.98);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.38);
-  z-index: 40;
-}
+    res.json(updatedMessage);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
-.chat-action-menu button {
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: #cbd5e1;
-  padding: 9px 10px;
-  border-radius: 11px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 750;
-  text-align: left;
-}
+const getFlaggedSummary = async (req, res) => {
+  try {
+    const currentUserId = req.user._id;
 
-.chat-action-menu button:hover {
-  background: rgba(124, 58, 237, 0.16);
-  color: #f8fafc;
-}
+    const messages = await Message.find({
+      $and: [
+        {
+          $or: [{ senderId: currentUserId }, { receiverId: currentUserId }],
+        },
+        {
+          isFlagged: true,
+        },
+      ],
+    });
 
-.chat-action-menu button.danger {
-  color: #fca5a5;
-}
+    const summary = {
+      totalFlagged: messages.length,
+      pending: 0,
+      reviewed: 0,
+      dismissed: 0,
+      Spam: 0,
+      Harassment: 0,
+      "Hate Speech": 0,
+      Threat: 0,
+      Scam: 0,
+      Other: 0,
+    };
 
-.chat-action-menu button.danger:hover {
-  background: rgba(239, 68, 68, 0.15);
-}
+    messages.forEach((message) => {
+      if (message.flagStatus === "Pending") summary.pending += 1;
+      if (message.flagStatus === "Reviewed") summary.reviewed += 1;
+      if (message.flagStatus === "Dismissed") summary.dismissed += 1;
+
+      if (summary[message.flagCategory] !== undefined) {
+        summary[message.flagCategory] += 1;
+      }
+    });
+
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const getFlaggedMessages = async (req, res) => {
+  try {
+    const currentUserId = req.user._id;
+
+    const flaggedMessages = await Message.find({
+      $and: [
+        {
+          $or: [{ senderId: currentUserId }, { receiverId: currentUserId }],
+        },
+        {
+          isFlagged: true,
+        },
+      ],
+    })
+      .populate("senderId", "username email")
+      .populate("receiverId", "username email")
+      .populate("flaggedBy", "username email")
+      .sort({ flaggedAt: -1 })
+      .limit(100);
+
+    res.json(flaggedMessages);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const updateFlagStatus = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { flagStatus } = req.body;
+
+    const allowedStatuses = ["Pending", "Reviewed", "Dismissed"];
+
+    if (!allowedStatuses.includes(flagStatus)) {
+      return res.status(400).json({ message: "Invalid flag status" });
+    }
+
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    const currentUserId = req.user._id.toString();
+
+    const isSender = message.senderId.toString() === currentUserId;
+    const isReceiver = message.receiverId.toString() === currentUserId;
+
+    if (!isSender && !isReceiver) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    message.flagStatus = flagStatus;
+    message.reviewedAt = new Date();
+
+    await message.save();
+
+    res.json(message);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = {
+  sendMessage,
+  getMessages,
+  flagMessage,
+  getFlaggedSummary,
+  getFlaggedMessages,
+  updateFlagStatus,
+};
+
+
+==================== ..\backend\routes\messageRoutes.js ====================
+
+const express = require("express");
+
+const {
+  sendMessage,
+  getMessages,
+  flagMessage,
+  getFlaggedSummary,
+  getFlaggedMessages,
+  updateFlagStatus,
+} = require("../controllers/messageController");
+
+const { protect } = require("../middleware/authMiddleware");
+
+const router = express.Router();
+
+router.post("/", protect, sendMessage);
+
+router.get("/flags/summary", protect, getFlaggedSummary);
+router.get("/flags/list", protect, getFlaggedMessages);
+router.patch("/:messageId/flag", protect, flagMessage);
+router.patch("/:messageId/flag-status", protect, updateFlagStatus);
+
+router.get("/:chatId", protect, getMessages);
+
+module.exports = router;

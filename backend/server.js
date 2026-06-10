@@ -52,6 +52,14 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("messageUpdated", ({ receiverId, message }) => {
+    const receiverSocketId = onlineUsers.get(receiverId);
+
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("messageUpdated", message);
+    }
+  });
+
   socket.on("messagesSeen", ({ receiverId, chatId }) => {
     const receiverSocketId = onlineUsers.get(receiverId);
 
@@ -61,20 +69,20 @@ io.on("connection", (socket) => {
   });
 
   socket.on("typing", ({ receiverId, senderName, chatId }) => {
-  const receiverSocketId = onlineUsers.get(receiverId);
+    const receiverSocketId = onlineUsers.get(receiverId);
 
-  if (receiverSocketId) {
-    io.to(receiverSocketId).emit("typing", { senderName, chatId });
-  }
-});
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("typing", { senderName, chatId });
+    }
+  });
 
-socket.on("stopTyping", ({ receiverId, chatId }) => {
-  const receiverSocketId = onlineUsers.get(receiverId);
+  socket.on("stopTyping", ({ receiverId, chatId }) => {
+    const receiverSocketId = onlineUsers.get(receiverId);
 
-  if (receiverSocketId) {
-    io.to(receiverSocketId).emit("stopTyping", { chatId });
-  }
-});
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("stopTyping", { chatId });
+    }
+  });
 
   socket.on("disconnect", () => {
     for (const [userId, socketId] of onlineUsers.entries()) {
