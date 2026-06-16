@@ -1,5 +1,12 @@
 ﻿import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { Search, Edit, MessageCircle, Users, Loader2 } from "lucide-react";
+import {
+  Search,
+  Edit,
+  MessageCircle,
+  Users,
+  Loader2,
+  Trash2,
+} from "lucide-react";
 import api from "../../lib/api.js";
 
 function initials(name = "") {
@@ -41,6 +48,7 @@ export default function ConversationList({
   selectedChatId,
   onSelectChat,
   reloadKey,
+  onlineUsers = [],
 }) {
   const currentUser = getCurrentUser();
   const currentUserId = currentUser?._id || currentUser?.id;
@@ -59,7 +67,7 @@ export default function ConversationList({
   const getOtherMember = useCallback(
     (chat) => {
       return chat?.members?.find(
-        (member) => member._id?.toString() !== currentUserId?.toString()
+        (member) => member?._id?.toString() !== currentUserId?.toString()
       );
     },
     [currentUserId]
@@ -96,6 +104,15 @@ export default function ConversationList({
     return chats
       .filter((chat) => {
         const otherUser = getOtherMember(chat);
+
+        // Filter out chats where the other user was deleted or is missing data
+        if (
+          !otherUser ||
+          (!otherUser.username && !otherUser.email && !otherUser.name)
+        ) {
+          return false;
+        }
+
         const text = `${getUserName(otherUser)} ${
           otherUser?.email || ""
         }`.toLowerCase();
@@ -139,6 +156,24 @@ export default function ConversationList({
 
     const otherUser = getOtherMember(chat);
     onSelectChat(chat, otherUser);
+  };
+
+  const handleDeleteChat = async (e, chatId) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!window.confirm("Are you sure you want to delete this conversation?"))
+      return;
+
+    try {
+      await api.patch(`/chats/${chatId}/delete-for-me`);
+      setChats((prev) => prev.filter((c) => c._id !== chatId));
+      if (selectedChatId === chatId) {
+        onSelectChat(null, null);
+      }
+    } catch (error) {
+      console.error("Failed to delete chat:", error);
+    }
   };
 
   return (
@@ -199,19 +234,23 @@ export default function ConversationList({
               filteredChats.map((chat) => {
                 const otherUser = getOtherMember(chat);
                 const isSelected = chat._id === selectedChatId;
+                const isOnline = onlineUsers.includes(otherUser?._id);
+                const displayOtherUser = otherUser
+                  ? { ...otherUser, isOnline }
+                  : null;
 
                 return (
                   <button
                     key={chat._id}
                     onClick={() => handleOpenExistingChat(chat)}
-                    className={`w-full text-left rounded-[26px] p-3 mb-2 apple-card-hover ${
+                    className={`group w-full text-left rounded-[26px] p-3 mb-2 apple-card-hover ${
                       isSelected
                         ? "bg-white shadow-[0_16px_38px_rgba(99,102,241,0.12)] border border-[#E0E7FF]"
                         : "hover:bg-white/88"
                     }`}
                   >
                     <div className="flex gap-3 items-center">
-                      <Avatar user={otherUser} />
+                      <Avatar user={displayOtherUser} />
 
                       <div className="flex-1 min-w-0 border-b border-slate-200/60 pb-3">
                         <div className="flex items-center justify-between gap-2 mb-1">
@@ -219,17 +258,26 @@ export default function ConversationList({
                             {getUserName(otherUser)}
                           </h3>
 
-                          <span className="text-xs text-slate-400 whitespace-nowrap">
-                            {chat.updatedAt
-                              ? new Date(chat.updatedAt).toLocaleTimeString(
-                                  [],
-                                  {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  }
-                                )
-                              : ""}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <div
+                              onClick={(e) => handleDeleteChat(e, chat._id)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full shrink-0"
+                              title="Delete conversation"
+                            >
+                              <Trash2 size={15} />
+                            </div>
+                            <span className="text-xs text-slate-400 whitespace-nowrap">
+                              {chat.updatedAt
+                                ? new Date(chat.updatedAt).toLocaleTimeString(
+                                    [],
+                                    {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    }
+                                  )
+                                : ""}
+                            </span>
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -255,37 +303,42 @@ export default function ConversationList({
               People
             </div>
 
-            {filteredUsers.map((user) => (
-              <button
-                key={user._id}
-                onClick={() => handleStartChat(user)}
-                disabled={startingChatId === user._id}
-                className="w-full text-left rounded-[26px] p-3 mb-2 hover:bg-white/88 apple-card-hover disabled:opacity-60"
-              >
-                <div className="flex gap-3 items-center">
-                  <Avatar user={user} />
+            {filteredUsers.map((user) => {
+              const isOnline = onlineUsers.includes(user._id);
+              const displayUser = { ...user, isOnline };
 
-                  <div className="flex-1 min-w-0 border-b border-slate-200/60 pb-3">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <h3 className="font-black text-slate-950 truncate">
-                        {getUserName(user)}
-                      </h3>
+              return (
+                <button
+                  key={user._id}
+                  onClick={() => handleStartChat(user)}
+                  disabled={startingChatId === user._id}
+                  className="w-full text-left rounded-[26px] p-3 mb-2 hover:bg-white/88 apple-card-hover disabled:opacity-60"
+                >
+                  <div className="flex gap-3 items-center">
+                    <Avatar user={displayUser} />
 
-                      {startingChatId === user._id && (
-                        <Loader2
-                          size={16}
-                          className="animate-spin text-slate-400"
-                        />
-                      )}
+                    <div className="flex-1 min-w-0 border-b border-slate-200/60 pb-3">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <h3 className="font-black text-slate-950 truncate">
+                          {getUserName(user)}
+                        </h3>
+
+                        {startingChatId === user._id && (
+                          <Loader2
+                            size={16}
+                            className="animate-spin text-slate-400"
+                          />
+                        )}
+                      </div>
+
+                      <p className="truncate text-sm text-slate-500">
+                        {user.email}
+                      </p>
                     </div>
-
-                    <p className="truncate text-sm text-slate-500">
-                      {user.email}
-                    </p>
                   </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
 
             {filteredUsers.length === 0 && filteredChats.length === 0 && (
               <div className="h-60 flex flex-col items-center justify-center text-center text-slate-400">

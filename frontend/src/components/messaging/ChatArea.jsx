@@ -12,6 +12,7 @@ import {
   Check,
   CheckCheck,
   MessageCircle,
+  Trash2,
 } from "lucide-react";
 import api from "../../lib/api.js";
 
@@ -50,7 +51,13 @@ function Avatar({ user }) {
   );
 }
 
-export default function ChatArea({ chat, otherUser, onMessageSent }) {
+export default function ChatArea({
+  chat,
+  otherUser,
+  onMessageSent,
+  onlineUsers = [],
+  onOnlineUsersUpdate,
+}) {
   const currentUser = getCurrentUser();
   const currentUserId = currentUser?._id || currentUser?.id;
 
@@ -58,15 +65,15 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-const [isRecording, setIsRecording] = useState(false);
-const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
   const typingTimeoutRef = useRef(null);
-const mediaRecorderRef = useRef(null);
-const audioChunksRef = useRef([]);
-const recordingTimerRef = useRef(null);
-const recordingStartedAtRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+  const recordingStartedAtRef = useRef(null);
   useEffect(() => {
     if (!currentUserId) return;
 
@@ -87,10 +94,16 @@ const recordingStartedAtRef = useRef(null);
       socket.emit("addUser", currentUserId);
     });
 
+    socket.on("getOnlineUsers", (users) => {
+      onOnlineUsersUpdate?.(users);
+    });
+
     socket.on("receiveMessage", (incomingMessage) => {
       // If the message is for the currently active chat, silently mark it as viewed in the DB
       if (chat?._id && incomingMessage.chatId === chat._id) {
-        api.get(`/messages/${chat._id}`).catch((err) => console.log("Failed to mark as viewed", err));
+        api
+          .get(`/messages/${chat._id}`)
+          .catch((err) => console.log("Failed to mark as viewed", err));
       }
 
       setMessages((prev) => {
@@ -111,6 +124,15 @@ const recordingStartedAtRef = useRef(null);
       onMessageSent?.();
     });
 
+    socket.on("messageUpdated", (updatedMessage) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg._id === updatedMessage._id ? updatedMessage : msg
+        )
+      );
+      onMessageSent?.();
+    });
+
     socket.on("typing", (data) => {
       if (chat?._id && data.chatId === chat._id) {
         setIsTyping(true);
@@ -127,7 +149,7 @@ const recordingStartedAtRef = useRef(null);
       socket.disconnect();
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [currentUserId, chat?._id]);
+  }, [currentUserId, chat?._id, onOnlineUsersUpdate]);
 
   useEffect(() => {
     const loadMessages = async () => {
@@ -192,6 +214,29 @@ const recordingStartedAtRef = useRef(null);
     }
   };
 
+  const handleDeleteMessage = async (messageId) => {
+    if (!window.confirm("Are you sure you want to delete this message?"))
+      return;
+
+    try {
+      const res = await api.delete(`/messages/${messageId}`);
+      const deletedMessage = res.data;
+
+      setMessages((prev) =>
+        prev.map((msg) => (msg._id === messageId ? deletedMessage : msg))
+      );
+
+      socketRef.current?.emit("messageUpdated", {
+        receiverId: otherUser._id,
+        message: deletedMessage,
+      });
+
+      onMessageSent?.();
+    } catch (error) {
+      console.error("Failed to delete message:", error);
+    }
+  };
+
   const handleTyping = (e) => {
     setMessage(e.target.value);
 
@@ -212,126 +257,128 @@ const recordingStartedAtRef = useRef(null);
       });
     }, 2000); // Stop typing after 2 seconds of inactivity
   };
-const formatRecordingTime = (seconds) => {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
-};
+  const formatRecordingTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
 
-const stopRecordingTimer = () => {
-  if (recordingTimerRef.current) {
-    clearInterval(recordingTimerRef.current);
-    recordingTimerRef.current = null;
-  }
-};
-
-const startVoiceRecording = async () => {
-  if (!chat?._id || !otherUser?._id) return;
-
-  try {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      alert("Voice recording is not supported in this browser");
-      return;
+  const stopRecordingTimer = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
     }
+  };
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const startVoiceRecording = async () => {
+    if (!chat?._id || !otherUser?._id) return;
 
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm")
-      ? "audio/webm"
-      : "";
-
-    const mediaRecorder = new MediaRecorder(
-      stream,
-      mimeType ? { mimeType } : undefined
-    );
-
-    mediaRecorderRef.current = mediaRecorder;
-    audioChunksRef.current = [];
-    recordingStartedAtRef.current = Date.now();
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) {
-        audioChunksRef.current.push(event.data);
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        alert("Voice recording is not supported in this browser");
+        return;
       }
-    };
 
-    mediaRecorder.onstop = async () => {
-      try {
-        stream.getTracks().forEach((track) => track.stop());
-        stopRecordingTimer();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-        const duration = Math.max(
-          1,
-          Math.round((Date.now() - recordingStartedAtRef.current) / 1000)
-        );
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "";
 
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: mimeType || "audio/webm",
-        });
+      const mediaRecorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined
+      );
 
-        if (audioBlob.size < 1000) {
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      recordingStartedAtRef.current = Date.now();
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        try {
+          stream.getTracks().forEach((track) => track.stop());
+          stopRecordingTimer();
+
+          const duration = Math.max(
+            1,
+            Math.round((Date.now() - recordingStartedAtRef.current) / 1000)
+          );
+
+          const audioBlob = new Blob(audioChunksRef.current, {
+            type: mimeType || "audio/webm",
+          });
+
+          if (audioBlob.size < 1000) {
+            setIsRecording(false);
+            setRecordingSeconds(0);
+            return;
+          }
+
+          const formData = new FormData();
+          formData.append("chatId", chat._id);
+          formData.append("receiverId", otherUser._id);
+          formData.append("audioDuration", duration);
+          formData.append("audio", audioBlob, `voice-${Date.now()}.webm`);
+
+          const res = await api.post("/messages/voice", formData, {
+            headers: {
+              "Content-Type": "multipart/form-data",
+            },
+          });
+
+          const savedMessage = res.data;
+
+          setMessages((prev) => [...prev, savedMessage]);
+
+          socketRef.current?.emit("sendMessage", {
+            receiverId: otherUser._id,
+            message: savedMessage,
+          });
+
+          onMessageSent?.();
+        } catch (error) {
+          console.error("Failed to send voice message:", error);
+          alert(
+            error.response?.data?.message || "Failed to send voice message"
+          );
+        } finally {
           setIsRecording(false);
           setRecordingSeconds(0);
-          return;
+          audioChunksRef.current = [];
+          mediaRecorderRef.current = null;
         }
+      };
 
-        const formData = new FormData();
-        formData.append("chatId", chat._id);
-        formData.append("receiverId", otherUser._id);
-        formData.append("audioDuration", duration);
-        formData.append("audio", audioBlob, `voice-${Date.now()}.webm`);
+      mediaRecorder.start();
 
-        const res = await api.post("/messages/voice", formData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        });
+      setIsRecording(true);
+      setRecordingSeconds(0);
 
-        const savedMessage = res.data;
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error("Microphone error:", error);
+      alert("Microphone permission denied or unavailable");
+      setIsRecording(false);
+      stopRecordingTimer();
+    }
+  };
 
-        setMessages((prev) => [...prev, savedMessage]);
-
-        socketRef.current?.emit("sendMessage", {
-          receiverId: otherUser._id,
-          message: savedMessage,
-        });
-
-        onMessageSent?.();
-      } catch (error) {
-        console.error("Failed to send voice message:", error);
-        alert(error.response?.data?.message || "Failed to send voice message");
-      } finally {
-        setIsRecording(false);
-        setRecordingSeconds(0);
-        audioChunksRef.current = [];
-        mediaRecorderRef.current = null;
-      }
-    };
-
-    mediaRecorder.start();
-
-    setIsRecording(true);
-    setRecordingSeconds(0);
-
-    recordingTimerRef.current = setInterval(() => {
-      setRecordingSeconds((prev) => prev + 1);
-    }, 1000);
-  } catch (error) {
-    console.error("Microphone error:", error);
-    alert("Microphone permission denied or unavailable");
-    setIsRecording(false);
-    stopRecordingTimer();
-  }
-};
-
-const stopVoiceRecording = () => {
-  if (
-    mediaRecorderRef.current &&
-    mediaRecorderRef.current.state !== "inactive"
-  ) {
-    mediaRecorderRef.current.stop();
-  }
-};
+  const stopVoiceRecording = () => {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
+    }
+  };
   if (!chat || !otherUser) {
     return (
       <section className="h-full flex items-center justify-center imessage-bg">
@@ -353,11 +400,14 @@ const stopVoiceRecording = () => {
     );
   }
 
+  const isOtherUserOnline = onlineUsers.includes(otherUser?._id);
+  const displayOtherUser = { ...otherUser, isOnline: isOtherUserOnline };
+
   return (
     <section className="h-full flex flex-col min-w-0">
       <header className="h-[82px] px-6 flex items-center justify-between bg-white/70 backdrop-blur-2xl border-b border-slate-200/70">
         <div className="flex items-center gap-3 min-w-0">
-          <Avatar user={otherUser} />
+          <Avatar user={displayOtherUser} />
 
           <div className="min-w-0">
             <h2 className="font-black text-lg text-slate-950 truncate">
@@ -367,10 +417,10 @@ const stopVoiceRecording = () => {
             <div className="flex items-center gap-2 text-sm text-slate-500">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  otherUser?.isOnline ? "bg-emerald-400" : "bg-slate-300"
+                  isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
                 }`}
               />
-              <span>{otherUser?.isOnline ? "Online" : otherUser?.email}</span>
+              <span>{isOtherUserOnline ? "Online" : otherUser?.email}</span>
             </div>
           </div>
         </div>
@@ -431,8 +481,19 @@ const stopVoiceRecording = () => {
               return (
                 <div
                   key={msg._id || msg.id}
-                  className={`flex ${isSent ? "justify-end" : "justify-start"}`}
+                  className={`flex ${
+                    isSent ? "justify-end" : "justify-start"
+                  } group items-center gap-2`}
                 >
+                  {isSent && !msg.isDeleted && (
+                    <button
+                      onClick={() => handleDeleteMessage(msg._id || msg.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full shrink-0"
+                      title="Delete message"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                   <div
                     className={`max-w-[76%] flex flex-col ${
                       isSent ? "items-end" : "items-start"
@@ -464,18 +525,24 @@ const stopVoiceRecording = () => {
                       }`}
                     >
                       {msg.isDeleted ? (
-  "This message was deleted"
-) : msg.messageType === "voice" && msg.audioUrl ? (
-  <div className="min-w-[230px]">
-    <audio controls src={msg.audioUrl} className="w-full h-9" />
-    <div className="text-xs opacity-70 mt-1">
-      Voice message
-      {msg.audioDuration ? ` · ${formatRecordingTime(msg.audioDuration)}` : ""}
-    </div>
-  </div>
-) : (
-  msg.text
-)}
+                        "This message was deleted"
+                      ) : msg.messageType === "voice" && msg.audioUrl ? (
+                        <div className="min-w-[230px]">
+                          <audio
+                            controls
+                            src={msg.audioUrl}
+                            className="w-full h-9"
+                          />
+                          <div className="text-xs opacity-70 mt-1">
+                            Voice message
+                            {msg.audioDuration
+                              ? ` · ${formatRecordingTime(msg.audioDuration)}`
+                              : ""}
+                          </div>
+                        </div>
+                      ) : (
+                        msg.text
+                      )}
                     </div>
 
                     {isLastInGroup && (
@@ -570,16 +637,20 @@ const stopVoiceRecording = () => {
             </button>
           ) : (
             <button
-  type="button"
-  onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
-  className={`h-11 rounded-full flex items-center justify-center transition-all ${
-    isRecording
-      ? "w-28 bg-red-50 text-red-500 font-black text-xs"
-      : "w-11 text-[#6366F1] hover:bg-[#F0EDFF]"
-  }`}
->
-  {isRecording ? `Stop ${formatRecordingTime(recordingSeconds)}` : <Mic size={20} />}
-</button>
+              type="button"
+              onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+              className={`h-11 rounded-full flex items-center justify-center transition-all ${
+                isRecording
+                  ? "w-28 bg-red-50 text-red-500 font-black text-xs"
+                  : "w-11 text-[#6366F1] hover:bg-[#F0EDFF]"
+              }`}
+            >
+              {isRecording ? (
+                `Stop ${formatRecordingTime(recordingSeconds)}`
+              ) : (
+                <Mic size={20} />
+              )}
+            </button>
           )}
         </form>
       </footer>

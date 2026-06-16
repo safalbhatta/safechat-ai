@@ -1,8 +1,5 @@
 const express = require("express");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-
+const router = express.Router();
 const {
   sendMessage,
   sendVoiceMessage,
@@ -14,50 +11,24 @@ const {
   getFlaggedMessages,
   updateFlagStatus,
 } = require("../controllers/messageController");
-
 const { protect } = require("../middleware/authMiddleware");
+const upload = require("../middleware/uploadMiddleware");
 
-const router = express.Router();
+// All message routes are protected, so we apply the middleware to all
+router.use(protect);
 
-const voiceUploadDir = path.join(__dirname, "..", "uploads", "voices");
+router.route("/").post(sendMessage);
 
-fs.mkdirSync(voiceUploadDir, { recursive: true });
+router.route("/voice").post(upload.single("audio"), sendVoiceMessage);
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, voiceUploadDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || ".webm";
-    cb(null, `voice-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
-  },
-});
+router.route("/flagged/summary").get(getFlaggedSummary);
+router.route("/flagged").get(getFlaggedMessages);
 
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-  },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype && file.mimetype.startsWith("audio/")) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only audio files are allowed"));
-    }
-  },
-});
+router.route("/:chatId").get(getMessages);
 
-router.post("/", protect, sendMessage);
-router.post("/voice", protect, upload.single("audio"), sendVoiceMessage);
+router.route("/:messageId").put(editMessage).delete(deleteMessage);
 
-router.get("/flags/summary", protect, getFlaggedSummary);
-router.get("/flags/list", protect, getFlaggedMessages);
-
-router.patch("/:messageId/edit", protect, editMessage);
-router.patch("/:messageId/delete", protect, deleteMessage);
-router.patch("/:messageId/flag", protect, flagMessage);
-router.patch("/:messageId/flag-status", protect, updateFlagStatus);
-
-router.get("/:chatId", protect, getMessages);
+router.route("/:messageId/flag").post(flagMessage);
+router.route("/:messageId/flag-status").put(updateFlagStatus);
 
 module.exports = router;

@@ -8,6 +8,7 @@ export default function Messages() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [showConversationList, setShowConversationList] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  const [onlineUsers, setOnlineUsers] = useState([]);
 
   const handleSelectChat = (chat, user) => {
     setSelectedChat(chat);
@@ -30,6 +31,7 @@ export default function Messages() {
           selectedChatId={selectedChat?._id}
           onSelectChat={handleSelectChat}
           reloadKey={reloadKey}
+          onlineUsers={onlineUsers}
         />
       </div>
 
@@ -50,6 +52,8 @@ export default function Messages() {
           chat={selectedChat}
           otherUser={selectedUser}
           onMessageSent={refreshChats}
+          onlineUsers={onlineUsers}
+          onOnlineUsersUpdate={setOnlineUsers}
         />
       </div>
     </div>
