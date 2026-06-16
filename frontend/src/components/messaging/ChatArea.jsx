@@ -57,12 +57,17 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
 
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
 
   useEffect(() => {
     if (!currentUserId) return;
+
+    // Reset typing state when switching to a different chat
+    setIsTyping(false);
 
     const socket = io(
       import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:5002",
@@ -91,8 +96,21 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
       });
     });
 
+    socket.on("typing", (data) => {
+      if (chat?._id && data.chatId === chat._id) {
+        setIsTyping(true);
+      }
+    });
+
+    socket.on("stopTyping", (data) => {
+      if (chat?._id && data.chatId === chat._id) {
+        setIsTyping(false);
+      }
+    });
+
     return () => {
       socket.disconnect();
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, [currentUserId, chat?._id]);
 
@@ -145,12 +163,39 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
         message: savedMessage,
       });
 
+      // Stop typing indicator when message is sent
+      socketRef.current?.emit("stopTyping", {
+        receiverId: otherUser._id,
+        chatId: chat._id,
+      });
+
       onMessageSent?.();
     } catch (error) {
       console.error("Failed to send message:", error);
       alert(error.response?.data?.message || "Failed to send message");
       setMessage(text);
     }
+  };
+
+  const handleTyping = (e) => {
+    setMessage(e.target.value);
+
+    if (!socketRef.current || !otherUser?._id || !chat?._id) return;
+
+    socketRef.current.emit("typing", {
+      receiverId: otherUser._id,
+      senderName: getUserName(currentUser),
+      chatId: chat._id,
+    });
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    typingTimeoutRef.current = setTimeout(() => {
+      socketRef.current.emit("stopTyping", {
+        receiverId: otherUser._id,
+        chatId: chat._id,
+      });
+    }, 2000); // Stop typing after 2 seconds of inactivity
   };
 
   if (!chat || !otherUser) {
@@ -318,6 +363,21 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
             })
           )}
 
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="max-w-[76%] flex flex-col items-start">
+                <div className="px-4 py-3.5 text-[15px] leading-6 message-in rounded-[22px] rounded-bl-[6px] flex gap-1.5 items-center h-[44px]">
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
+                </div>
+                <div className="mt-1 px-1 text-xs text-slate-400">
+                  {getUserName(otherUser)} is typing...
+                </div>
+              </div>
+            </div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -343,7 +403,7 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
               type="text"
               placeholder={`Message ${getUserName(otherUser)}`}
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={handleTyping}
               className="apple-input w-full h-12 rounded-full pl-5 pr-12 text-slate-900 placeholder:text-slate-400"
             />
 
