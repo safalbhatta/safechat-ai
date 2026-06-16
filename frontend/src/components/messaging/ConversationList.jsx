@@ -88,12 +88,38 @@ export default function ConversationList({
     });
   }, [chats, searchQuery, getOtherMember]);
 
-  const filteredUsers = useMemo(() => {
-    return users.filter((user) => {
-      const text = `${getUserName(user)} ${user.email || ""}`.toLowerCase();
-      return text.includes(searchQuery.toLowerCase());
+  const chatMemberIds = useMemo(() => {
+  const ids = new Set();
+
+  chats.forEach((chat) => {
+    chat.members?.forEach((member) => {
+      ids.add(member._id?.toString());
     });
-  }, [users, searchQuery]);
+  });
+
+  return ids;
+}, [chats]);
+
+const filteredUsers = useMemo(() => {
+  const q = searchQuery.trim().toLowerCase();
+
+  // Do not show all users by default.
+  // Users only appear when searching to start a new chat.
+  if (!q) return [];
+
+  return users.filter((user) => {
+    const userId = user._id?.toString();
+
+    // Do not show myself
+    if (userId === currentUserId?.toString()) return false;
+
+    // Do not show users I already have a chat with
+    if (chatMemberIds.has(userId)) return false;
+
+    const text = `${getUserName(user)} ${user.email || ""}`.toLowerCase();
+    return text.includes(q);
+  });
+}, [users, searchQuery, currentUserId, chatMemberIds]);
 
   const handleStartChat = async (user) => {
     try {
@@ -127,8 +153,8 @@ export default function ConversationList({
               Messages
             </h1>
             <p className="text-sm text-slate-500 mt-2">
-              Real users from backend
-            </p>
+  Your private conversations
+</p>
           </div>
 
           <button
@@ -226,7 +252,7 @@ export default function ConversationList({
 
             <div className="px-3 pt-5 pb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
               <Users size={14} />
-              People
+Search People
             </div>
 
             {filteredUsers.map((user) => (
