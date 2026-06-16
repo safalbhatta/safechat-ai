@@ -1,14 +1,16 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search, Edit, MessageCircle, Users, Loader2 } from "lucide-react";
 import api from "../../lib/api.js";
 
 function initials(name = "") {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "U";
+  return (
+    name
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "U"
+  );
 }
 
 function getCurrentUser() {
@@ -60,8 +62,6 @@ export default function ConversationList({
 
   const loadData = useCallback(async () => {
     try {
-      setLoading(true);
-
       const [usersRes, chatsRes] = await Promise.all([
         api.get("/users"),
         api.get("/chats"),
@@ -81,45 +81,25 @@ export default function ConversationList({
   }, [loadData, reloadKey]);
 
   const filteredChats = useMemo(() => {
-    return chats.filter((chat) => {
-      const otherUser = getOtherMember(chat);
-      const text = `${getUserName(otherUser)} ${otherUser?.email || ""}`.toLowerCase();
+    return chats
+      .filter((chat) => {
+        const otherUser = getOtherMember(chat);
+        const text = `${getUserName(otherUser)} ${
+          otherUser?.email || ""
+        }`.toLowerCase();
+        return text.includes(searchQuery.toLowerCase());
+      })
+      .map((chat) =>
+        chat._id === selectedChatId ? { ...chat, unreadCount: 0 } : chat
+      );
+  }, [chats, searchQuery, getOtherMember, selectedChatId]);
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      const text = `${getUserName(user)} ${user.email || ""}`.toLowerCase();
       return text.includes(searchQuery.toLowerCase());
     });
-  }, [chats, searchQuery, getOtherMember]);
-
-  const chatMemberIds = useMemo(() => {
-  const ids = new Set();
-
-  chats.forEach((chat) => {
-    chat.members?.forEach((member) => {
-      ids.add(member._id?.toString());
-    });
-  });
-
-  return ids;
-}, [chats]);
-
-const filteredUsers = useMemo(() => {
-  const q = searchQuery.trim().toLowerCase();
-
-  // Do not show all users by default.
-  // Users only appear when searching to start a new chat.
-  if (!q) return [];
-
-  return users.filter((user) => {
-    const userId = user._id?.toString();
-
-    // Do not show myself
-    if (userId === currentUserId?.toString()) return false;
-
-    // Do not show users I already have a chat with
-    if (chatMemberIds.has(userId)) return false;
-
-    const text = `${getUserName(user)} ${user.email || ""}`.toLowerCase();
-    return text.includes(q);
-  });
-}, [users, searchQuery, currentUserId, chatMemberIds]);
+  }, [users, searchQuery]);
 
   const handleStartChat = async (user) => {
     try {
@@ -140,6 +120,11 @@ const filteredUsers = useMemo(() => {
   };
 
   const handleOpenExistingChat = (chat) => {
+    // Instantly clear the unread notification badge locally
+    setChats((prevChats) =>
+      prevChats.map((c) => (c._id === chat._id ? { ...c, unreadCount: 0 } : c))
+    );
+
     const otherUser = getOtherMember(chat);
     onSelectChat(chat, otherUser);
   };
@@ -153,8 +138,8 @@ const filteredUsers = useMemo(() => {
               Messages
             </h1>
             <p className="text-sm text-slate-500 mt-2">
-  Your private conversations
-</p>
+              Real users from backend
+            </p>
           </div>
 
           <button
@@ -224,10 +209,13 @@ const filteredUsers = useMemo(() => {
 
                           <span className="text-xs text-slate-400 whitespace-nowrap">
                             {chat.updatedAt
-                              ? new Date(chat.updatedAt).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })
+                              ? new Date(chat.updatedAt).toLocaleTimeString(
+                                  [],
+                                  {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  }
+                                )
                               : ""}
                           </span>
                         </div>
@@ -252,7 +240,7 @@ const filteredUsers = useMemo(() => {
 
             <div className="px-3 pt-5 pb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
               <Users size={14} />
-Search People
+              People
             </div>
 
             {filteredUsers.map((user) => (
@@ -272,7 +260,10 @@ Search People
                       </h3>
 
                       {startingChatId === user._id && (
-                        <Loader2 size={16} className="animate-spin text-slate-400" />
+                        <Loader2
+                          size={16}
+                          className="animate-spin text-slate-400"
+                        />
                       )}
                     </div>
 

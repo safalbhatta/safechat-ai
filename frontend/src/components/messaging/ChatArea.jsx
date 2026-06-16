@@ -1,4 +1,4 @@
-﻿﻿import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import {
   Phone,
@@ -78,7 +78,10 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
 
     socketRef.current = socket;
 
-    socket.emit("addUser", currentUserId);
+    // Register user on initial connection AND automatic reconnections after inactivity
+    socket.on("connect", () => {
+      socket.emit("addUser", currentUserId);
+    });
 
     socket.on("receiveMessage", (incomingMessage) => {
       setMessages((prev) => {
@@ -94,6 +97,9 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
 
         return prev;
       });
+
+      // Trigger the parent's reload callback to update sidebar in real-time
+      onMessageSent?.();
     });
 
     socket.on("typing", (data) => {
