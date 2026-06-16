@@ -58,11 +58,15 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-
+const [isRecording, setIsRecording] = useState(false);
+const [recordingSeconds, setRecordingSeconds] = useState(0);
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
   const typingTimeoutRef = useRef(null);
-
+const mediaRecorderRef = useRef(null);
+const audioChunksRef = useRef([]);
+const recordingTimerRef = useRef(null);
+const recordingStartedAtRef = useRef(null);
   useEffect(() => {
     if (!currentUserId) return;
 
@@ -208,7 +212,126 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
       });
     }, 2000); // Stop typing after 2 seconds of inactivity
   };
+const formatRecordingTime = (seconds) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+};
 
+const stopRecordingTimer = () => {
+  if (recordingTimerRef.current) {
+    clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = null;
+  }
+};
+
+const startVoiceRecording = async () => {
+  if (!chat?._id || !otherUser?._id) return;
+
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      alert("Voice recording is not supported in this browser");
+      return;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+      ? "audio/webm"
+      : "";
+
+    const mediaRecorder = new MediaRecorder(
+      stream,
+      mimeType ? { mimeType } : undefined
+    );
+
+    mediaRecorderRef.current = mediaRecorder;
+    audioChunksRef.current = [];
+    recordingStartedAtRef.current = Date.now();
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        audioChunksRef.current.push(event.data);
+      }
+    };
+
+    mediaRecorder.onstop = async () => {
+      try {
+        stream.getTracks().forEach((track) => track.stop());
+        stopRecordingTimer();
+
+        const duration = Math.max(
+          1,
+          Math.round((Date.now() - recordingStartedAtRef.current) / 1000)
+        );
+
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mimeType || "audio/webm",
+        });
+
+        if (audioBlob.size < 1000) {
+          setIsRecording(false);
+          setRecordingSeconds(0);
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("chatId", chat._id);
+        formData.append("receiverId", otherUser._id);
+        formData.append("audioDuration", duration);
+        formData.append("audio", audioBlob, `voice-${Date.now()}.webm`);
+
+        const res = await api.post("/messages/voice", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        });
+
+        const savedMessage = res.data;
+
+        setMessages((prev) => [...prev, savedMessage]);
+
+        socketRef.current?.emit("sendMessage", {
+          receiverId: otherUser._id,
+          message: savedMessage,
+        });
+
+        onMessageSent?.();
+      } catch (error) {
+        console.error("Failed to send voice message:", error);
+        alert(error.response?.data?.message || "Failed to send voice message");
+      } finally {
+        setIsRecording(false);
+        setRecordingSeconds(0);
+        audioChunksRef.current = [];
+        mediaRecorderRef.current = null;
+      }
+    };
+
+    mediaRecorder.start();
+
+    setIsRecording(true);
+    setRecordingSeconds(0);
+
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1);
+    }, 1000);
+  } catch (error) {
+    console.error("Microphone error:", error);
+    alert("Microphone permission denied or unavailable");
+    setIsRecording(false);
+    stopRecordingTimer();
+  }
+};
+
+const stopVoiceRecording = () => {
+  if (
+    mediaRecorderRef.current &&
+    mediaRecorderRef.current.state !== "inactive"
+  ) {
+    mediaRecorderRef.current.stop();
+  }
+};
   if (!chat || !otherUser) {
     return (
       <section className="h-full flex items-center justify-center imessage-bg">
@@ -340,7 +463,19 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
                             }`
                       }`}
                     >
-                      {msg.isDeleted ? "This message was deleted" : msg.text}
+                      {msg.isDeleted ? (
+  "This message was deleted"
+) : msg.messageType === "voice" && msg.audioUrl ? (
+  <div className="min-w-[230px]">
+    <audio controls src={msg.audioUrl} className="w-full h-9" />
+    <div className="text-xs opacity-70 mt-1">
+      Voice message
+      {msg.audioDuration ? ` · ${formatRecordingTime(msg.audioDuration)}` : ""}
+    </div>
+  </div>
+) : (
+  msg.text
+)}
                     </div>
 
                     {isLastInGroup && (
@@ -435,11 +570,16 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
             </button>
           ) : (
             <button
-              type="button"
-              className="w-11 h-11 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
-            >
-              <Mic size={20} />
-            </button>
+  type="button"
+  onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+  className={`h-11 rounded-full flex items-center justify-center transition-all ${
+    isRecording
+      ? "w-28 bg-red-50 text-red-500 font-black text-xs"
+      : "w-11 text-[#6366F1] hover:bg-[#F0EDFF]"
+  }`}
+>
+  {isRecording ? `Stop ${formatRecordingTime(recordingSeconds)}` : <Mic size={20} />}
+</button>
           )}
         </form>
       </footer>

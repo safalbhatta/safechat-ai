@@ -21,9 +21,11 @@ const updateChatLastMessage = async (chatId) => {
   }
 
   await Chat.findByIdAndUpdate(chatId, {
-    lastMessage: latestMessage.isDeleted
-      ? "This message was deleted"
-      : latestMessage.text,
+   lastMessage: latestMessage.isDeleted
+  ? "This message was deleted"
+  : latestMessage.messageType === "voice"
+  ? "🎤 Voice message"
+  : latestMessage.text,
   });
 };
 
@@ -39,6 +41,7 @@ const sendMessage = async (req, res) => {
       chatId,
       senderId: req.user._id,
       receiverId,
+      messageType: "text",
       text,
       replyTo: replyTo || null,
       isViewed: false,
@@ -66,7 +69,65 @@ const sendMessage = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+const sendVoiceMessage = async (req, res) => {
+  try {
+    const { chatId, receiverId, audioDuration } = req.body;
 
+    if (!chatId || !receiverId || !req.file) {
+      return res.status(400).json({ message: "Missing voice message fields" });
+    }
+
+    const chat = await Chat.findById(chatId);
+
+    if (!chat) {
+      return res.status(404).json({ message: "Chat not found" });
+    }
+
+    const isMember = chat.members.some(
+      (memberId) => memberId.toString() === req.user._id.toString()
+    );
+
+    if (!isMember) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    const audioUrl = `${req.protocol}://${req.get("host")}/uploads/voices/${
+      req.file.filename
+    }`;
+
+    const message = await Message.create({
+      chatId,
+      senderId: req.user._id,
+      receiverId,
+      messageType: "voice",
+      text: "",
+      audioUrl,
+      audioDuration: Number(audioDuration) || 0,
+      isViewed: false,
+      isEdited: false,
+      isDeleted: false,
+      isFlagged: false,
+      flagCategory: "None",
+      flagReason: "",
+      flagStatus: "None",
+    });
+
+    await Chat.findByIdAndUpdate(chatId, {
+      $set: {
+        lastMessage: "🎤 Voice message",
+      },
+      $pull: {
+        deletedFor: { $in: [req.user._id, receiverId] },
+      },
+    });
+
+    const populatedMessage = await getMessageWithReply(message._id);
+
+    res.status(201).json(populatedMessage);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 const getMessages = async (req, res) => {
   try {
     const chatId = req.params.chatId;
@@ -372,6 +433,7 @@ const updateFlagStatus = async (req, res) => {
 
 module.exports = {
   sendMessage,
+  sendVoiceMessage,
   getMessages,
   editMessage,
   deleteMessage,

@@ -20,11 +20,27 @@ const messageSchema = new mongoose.Schema(
       required: true,
     },
 
-    text: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    messageType: {
+  type: String,
+  enum: ["text", "voice"],
+  default: "text",
+},
+
+text: {
+  type: String,
+  default: "",
+  trim: true,
+},
+
+audioUrl: {
+  type: String,
+  default: "",
+},
+
+audioDuration: {
+  type: Number,
+  default: 0,
+},
 
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
