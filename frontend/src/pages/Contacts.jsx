@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useState, useEffect } from "react";
 import {
   Search,
   UserPlus,
@@ -11,9 +11,14 @@ import {
   Star,
   Filter,
 } from "lucide-react";
-import { users } from "../data/mockData.js";
+import api from "../lib/api.js";
+
+function getUserName(user) {
+  return user?.username || user?.name || user?.email || "Unknown User";
+}
 
 function initials(name) {
+  if (!name) return "U";
   return name
     .split(" ")
     .map((part) => part[0])
@@ -24,9 +29,26 @@ function initials(name) {
 
 export default function Contacts() {
   const [search, setSearch] = useState("");
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const res = await api.get("/users");
+        setUsers(res.data || []);
+      } catch (error) {
+        console.error("Failed to load users:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUsers();
+  }, []);
 
   const filteredUsers = users.filter((user) =>
-    user.name.toLowerCase().includes(search.toLowerCase())
+    getUserName(user).toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -81,82 +103,86 @@ export default function Contacts() {
         </section>
 
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {filteredUsers.map((user, index) => (
-            <div
-              key={user.id}
-              className="page-card page-card-hover rounded-[30px] p-5"
-            >
-              <div className="flex items-start justify-between mb-5">
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <div className="w-16 h-16 rounded-[24px] bg-gradient-to-br from-[#6366F1] via-[#8B5CF6] to-[#06B6D4] text-white flex items-center justify-center text-xl font-black shadow-[0_14px_32px_rgba(99,102,241,0.30)]">
-                      {initials(user.name)}
+          {loading ? (
+            <div className="col-span-full py-20 flex justify-center text-slate-400 font-bold">
+              Loading contacts...
+            </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="col-span-full py-20 flex justify-center text-slate-400 font-bold">
+              No contacts found.
+            </div>
+          ) : (
+            filteredUsers.map((user, index) => (
+              <div
+                key={user._id}
+                className="page-card page-card-hover rounded-[30px] p-5"
+              >
+                <div className="flex items-start justify-between mb-5">
+                  <div className="flex items-center gap-4">
+                    <div className="relative">
+                      <div className="w-16 h-16 rounded-[24px] bg-gradient-to-br from-[#6366F1] via-[#8B5CF6] to-[#06B6D4] text-white flex items-center justify-center text-xl font-black shadow-[0_14px_32px_rgba(99,102,241,0.30)]">
+                        {initials(getUserName(user))}
+                      </div>
+
+                      <span
+                        className={`absolute -right-1 -bottom-1 w-5 h-5 rounded-full border-3 border-white ${
+                          user.isOnline ? "bg-emerald-400" : "bg-slate-300"
+                        }`}
+                      />
                     </div>
 
-                    <span
-                      className={`absolute -right-1 -bottom-1 w-5 h-5 rounded-full border-3 border-white ${
-                        user.status === "online"
-                          ? "bg-emerald-400"
-                          : user.status === "away"
-                            ? "bg-amber-400"
-                            : "bg-slate-300"
-                      }`}
-                    />
+                    <div>
+                      <h3 className="font-black text-lg text-slate-950">
+                        {getUserName(user)}
+                      </h3>
+                      <p className="text-sm text-slate-500 font-bold">
+                        {user.email}
+                      </p>
+                    </div>
                   </div>
 
-                  <div>
-                    <h3 className="font-black text-lg text-slate-950">
-                      {user.name}
-                    </h3>
-                    <p className="text-sm text-slate-500 font-bold">
-                      @{user.username}
-                    </p>
-                  </div>
+                  <button className="w-10 h-10 rounded-2xl hover:bg-slate-100 text-slate-400 flex items-center justify-center">
+                    <MoreVertical size={19} />
+                  </button>
                 </div>
 
-                <button className="w-10 h-10 rounded-2xl hover:bg-slate-100 text-slate-400 flex items-center justify-center">
-                  <MoreVertical size={19} />
-                </button>
-              </div>
+                <p className="text-slate-500 text-sm leading-6 mb-5">
+                  {user.bio ||
+                    "Available for fast messaging, collaboration, and updates."}
+                </p>
 
-              <p className="text-slate-500 text-sm leading-6 mb-5">
-                {user.bio ||
-                  "Available for fast messaging, collaboration, and updates."}
-              </p>
-
-              <div className="flex items-center gap-2 mb-5">
-                <span
-                  className={`pill-soft ${
-                    user.status === "online"
-                      ? "bg-emerald-50 text-emerald-600"
-                      : user.status === "away"
-                        ? "bg-amber-50 text-amber-600"
+                <div className="flex items-center gap-2 mb-5">
+                  <span
+                    className={`pill-soft ${
+                      user.isOnline
+                        ? "bg-emerald-50 text-emerald-600"
                         : "bg-slate-100 text-slate-500"
-                  }`}
-                >
-                  {user.status}
-                </span>
-
-                {index < 2 && (
-                  <span className="pill-soft bg-indigo-50 text-indigo-600 inline-flex items-center gap-1">
-                    <Star size={13} fill="currentColor" />
-                    Favorite
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                {[MessageSquare, Phone, Video, Mail].map((Icon, i) => (
-                  <button
-                    key={i}
-                    className="h-11 rounded-2xl bg-slate-50 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 flex items-center justify-center"
+                    }`}
                   >
-                    <Icon size={18} />
-                  </button>
-                ))}
+                    {user.isOnline ? "online" : "offline"}
+                  </span>
+
+                  {index < 2 && (
+                    <span className="pill-soft bg-indigo-50 text-indigo-600 inline-flex items-center gap-1">
+                      <Star size={13} fill="currentColor" />
+                      Favorite
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {[MessageSquare, Phone, Video, Mail].map((Icon, i) => (
+                    <button
+                      key={i}
+                      className="h-11 rounded-2xl bg-slate-50 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 flex items-center justify-center"
+                    >
+                      <Icon size={18} />
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </section>
       </div>
     </div>

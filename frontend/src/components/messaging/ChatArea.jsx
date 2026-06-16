@@ -84,6 +84,11 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
     });
 
     socket.on("receiveMessage", (incomingMessage) => {
+      // If the message is for the currently active chat, silently mark it as viewed in the DB
+      if (chat?._id && incomingMessage.chatId === chat._id) {
+        api.get(`/messages/${chat._id}`).catch((err) => console.log("Failed to mark as viewed", err));
+      }
+
       setMessages((prev) => {
         const alreadyExists = prev.some(
           (item) => item._id === incomingMessage._id

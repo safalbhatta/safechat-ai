@@ -1,4 +1,4 @@
-﻿﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { Search, Edit, MessageCircle, Users, Loader2 } from "lucide-react";
 import api from "../../lib/api.js";
 
@@ -51,6 +51,11 @@ export default function ConversationList({
   const [loading, setLoading] = useState(true);
   const [startingChatId, setStartingChatId] = useState("");
 
+  const selectedChatIdRef = useRef(selectedChatId);
+  useEffect(() => {
+    selectedChatIdRef.current = selectedChatId;
+  }, [selectedChatId]);
+
   const getOtherMember = useCallback(
     (chat) => {
       return chat?.members?.find(
@@ -67,8 +72,15 @@ export default function ConversationList({
         api.get("/chats"),
       ]);
 
+      const fetchedChats = chatsRes.data || [];
+
       setUsers(usersRes.data || []);
-      setChats(chatsRes.data || []);
+      // Force unreadCount to 0 for active chat to prevent race condition when new message arrives
+      setChats(
+        fetchedChats.map((c) =>
+          c._id === selectedChatIdRef.current ? { ...c, unreadCount: 0 } : c
+        )
+      );
     } catch (error) {
       console.error("Failed to load chats/users:", error);
     } finally {
