@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+﻿﻿import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import {
   Phone,
@@ -16,12 +16,14 @@ import {
 import api from "../../lib/api.js";
 
 function initials(name = "") {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "U";
+  return (
+    name
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "U"
+  );
 }
 
 function getCurrentUser() {
@@ -62,9 +64,12 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
   useEffect(() => {
     if (!currentUserId) return;
 
-    const socket = io(import.meta.env.VITE_SOCKET_URL || "http://127.0.0.1:5000", {
-      transports: ["websocket", "polling"],
-    });
+    const socket = io(
+      import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:5002",
+      {
+        transports: ["websocket", "polling"],
+      }
+    );
 
     socketRef.current = socket;
 
@@ -222,7 +227,9 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
           ) : (
             messages.map((msg, index) => {
               const senderId =
-                typeof msg.senderId === "object" ? msg.senderId._id : msg.senderId;
+                typeof msg.senderId === "object"
+                  ? msg.senderId._id
+                  : msg.senderId;
 
               const isSent = senderId?.toString() === currentUserId?.toString();
 
@@ -257,12 +264,20 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
                         isSent ? "message-out" : "message-in"
                       } ${
                         isSent
-                          ? `${isFirstInGroup ? "rounded-t-[22px]" : "rounded-t-[10px]"} ${
+                          ? `${
+                              isFirstInGroup
+                                ? "rounded-t-[22px]"
+                                : "rounded-t-[10px]"
+                            } ${
                               isLastInGroup
                                 ? "rounded-bl-[22px] rounded-br-[6px]"
                                 : "rounded-b-[10px]"
                             }`
-                          : `${isFirstInGroup ? "rounded-t-[22px]" : "rounded-t-[10px]"} ${
+                          : `${
+                              isFirstInGroup
+                                ? "rounded-t-[22px]"
+                                : "rounded-t-[10px]"
+                            } ${
                               isLastInGroup
                                 ? "rounded-br-[22px] rounded-bl-[6px]"
                                 : "rounded-b-[10px]"
@@ -286,7 +301,10 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
                         {isSent && (
                           <>
                             {msg.isViewed ? (
-                              <CheckCheck size={14} className="text-[#6366F1]" />
+                              <CheckCheck
+                                size={14}
+                                className="text-[#6366F1]"
+                              />
                             ) : (
                               <Check size={14} />
                             )}
@@ -357,4 +375,3 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
     </section>
   );
 }
-
