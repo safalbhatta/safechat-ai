@@ -36,3 +36,27 @@ out/
 .idea/
 .DS_Store
 Thumbs.db
+
+# local env
+.env
+backend/.env
+frontend/.env
+.env.local
+
+# dependencies/build
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+dist/
+build/
+.vite/
+frontend/dist/
+backend/dist/
+
+# backups/temp
+frontend/src/backup-real-chat/
+frontend/src/backup-ui-b/
+safechat-import-review/
+remove-safechat-backup/
+*.backup.jsx
+*.backup.js
