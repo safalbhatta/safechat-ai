@@ -62,7 +62,7 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
   useEffect(() => {
     if (!currentUserId) return;
 
-    const socket = io("http://127.0.0.1:5000", {
+    const socket = io(import.meta.env.VITE_SOCKET_URL || "http://127.0.0.1:5000", {
       transports: ["websocket", "polling"],
     });
 
@@ -357,3 +357,4 @@ export default function ChatArea({ chat, otherUser, onMessageSent }) {
     </section>
   );
 }
+
