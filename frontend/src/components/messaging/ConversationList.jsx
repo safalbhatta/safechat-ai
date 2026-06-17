@@ -113,6 +113,11 @@ export default function ConversationList({
           return false;
         }
 
+        // Hide chats that have no messages yet
+        if (!chat.lastMessage) {
+          return false;
+        }
+
         const text = `${getUserName(otherUser)} ${
           otherUser?.email || ""
         }`.toLowerCase();
@@ -131,6 +136,17 @@ export default function ConversationList({
   }, [users, searchQuery]);
 
   const handleStartChat = async (user) => {
+    // 1. Instant access: Check if we already have a chat with this user
+    const existingChat = chats.find((c) => {
+      const other = getOtherMember(c);
+      return other?._id === user._id;
+    });
+
+    if (existingChat) {
+      handleOpenExistingChat(existingChat);
+      return;
+    }
+
     try {
       setStartingChatId(user._id);
 
@@ -138,8 +154,9 @@ export default function ConversationList({
         receiverId: user._id,
       });
 
-      await loadData();
+      // 2. Open chat instantly, refresh the sidebar silently in the background
       onSelectChat(res.data, user);
+      loadData();
     } catch (error) {
       console.error("Failed to start chat:", error);
       alert(error.response?.data?.message || "Failed to start chat");
