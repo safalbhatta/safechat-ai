@@ -1,34 +1,71 @@
 const express = require("express");
-const router = express.Router();
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
 const {
   sendMessage,
   sendVoiceMessage,
   getMessages,
   editMessage,
   deleteMessage,
+  forwardMessage,
+  togglePinMessage,
+  toggleStarMessage,
+  reactToMessage,
   flagMessage,
   getFlaggedSummary,
   getFlaggedMessages,
   updateFlagStatus,
 } = require("../controllers/messageController");
+
 const { protect } = require("../middleware/authMiddleware");
-const upload = require("../middleware/uploadMiddleware");
 
-// All message routes are protected, so we apply the middleware to all
-router.use(protect);
+const router = express.Router();
 
-router.route("/").post(sendMessage);
+const voiceUploadDir = path.join(__dirname, "..", "uploads", "voices");
 
-router.route("/voice").post(upload.single("audio"), sendVoiceMessage);
+fs.mkdirSync(voiceUploadDir, { recursive: true });
 
-router.route("/flagged/summary").get(getFlaggedSummary);
-router.route("/flagged").get(getFlaggedMessages);
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, voiceUploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".webm";
+    cb(null, `voice-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  },
+});
 
-router.route("/:chatId").get(getMessages);
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype && file.mimetype.startsWith("audio/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only audio files are allowed"));
+    }
+  },
+});
 
-router.route("/:messageId").put(editMessage).delete(deleteMessage);
+router.post("/", protect, sendMessage);
+router.post("/voice", protect, upload.single("audio"), sendVoiceMessage);
 
-router.route("/:messageId/flag").post(flagMessage);
-router.route("/:messageId/flag-status").put(updateFlagStatus);
+router.get("/flags/summary", protect, getFlaggedSummary);
+router.get("/flags/list", protect, getFlaggedMessages);
+
+router.patch("/:messageId/edit", protect, editMessage);
+router.patch("/:messageId/delete", protect, deleteMessage);
+router.post("/:messageId/forward", protect, forwardMessage);
+router.patch("/:messageId/toggle-pin", protect, togglePinMessage);
+router.patch("/:messageId/toggle-star", protect, toggleStarMessage);
+router.patch("/:messageId/reaction", protect, reactToMessage);
+router.patch("/:messageId/flag", protect, flagMessage);
+router.patch("/:messageId/flag-status", protect, updateFlagStatus);
+
+router.get("/:chatId", protect, getMessages);
 
 module.exports = router;

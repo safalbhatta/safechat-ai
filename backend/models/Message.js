@@ -21,32 +21,75 @@ const messageSchema = new mongoose.Schema(
     },
 
     messageType: {
-  type: String,
-  enum: ["text", "voice"],
-  default: "text",
-},
+      type: String,
+      enum: ["text", "voice"],
+      default: "text",
+    },
 
-text: {
-  type: String,
-  default: "",
-  trim: true,
-},
+    text: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
-audioUrl: {
-  type: String,
-  default: "",
-},
+    audioUrl: {
+      type: String,
+      default: "",
+    },
 
-audioDuration: {
-  type: Number,
-  default: 0,
-},
+    audioDuration: {
+      type: Number,
+      default: 0,
+    },
 
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
       default: null,
     },
+
+    isForwarded: {
+      type: Boolean,
+      default: false,
+    },
+
+    forwardedFrom: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
+    pinnedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    starredBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    reactions: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        emoji: {
+          type: String,
+          required: true,
+        },
+        reactedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
 
     isEdited: {
       type: Boolean,

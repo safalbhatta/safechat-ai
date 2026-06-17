@@ -12,7 +12,17 @@ import {
   Check,
   CheckCheck,
   MessageCircle,
+  Reply,
+  Copy,
+  Forward,
+  Pin,
+  Star,
+  SquareCheck,
+  Flag,
   Trash2,
+  Pencil,
+  X,
+  Download,
 } from "lucide-react";
 import api from "../../lib/api.js";
 
@@ -66,19 +76,33 @@ export default function ChatArea({
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [activeMessageMenu, setActiveMessageMenu] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [notice, setNotice] = useState("");
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [forwardTarget, setForwardTarget] = useState(null);
+  const [forwardUsers, setForwardUsers] = useState([]);
+  const [forwardSearch, setForwardSearch] = useState("");
+  const [forwardLoading, setForwardLoading] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+
   const messagesEndRef = useRef(null);
+  const chatAreaRef = useRef(null);
   const socketRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const longPressTimerRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const recordingTimerRef = useRef(null);
   const recordingStartedAtRef = useRef(null);
+
   useEffect(() => {
     if (!currentUserId) return;
 
-    // Reset typing state when switching to a different chat
     setIsTyping(false);
 
     const socket = io(
@@ -90,7 +114,6 @@ export default function ChatArea({
 
     socketRef.current = socket;
 
-    // Register user on initial connection AND automatic reconnections after inactivity
     socket.on("connect", () => {
       socket.emit("addUser", currentUserId);
     });
@@ -100,7 +123,6 @@ export default function ChatArea({
     });
 
     socket.on("receiveMessage", (incomingMessage) => {
-      // If the message is for the currently active chat, silently mark it as viewed in the DB
       if (chat?._id && incomingMessage.chatId === chat._id) {
         api
           .get(`/messages/${chat._id}`)
@@ -121,7 +143,6 @@ export default function ChatArea({
         return prev;
       });
 
-      // Trigger the parent's reload callback to update sidebar in real-time
       onMessageSent?.();
     });
 
@@ -155,6 +176,18 @@ export default function ChatArea({
   }, [currentUserId, chat?._id, onOnlineUsersUpdate, onTypingUpdate]);
 
   useEffect(() => {
+    const handleClickOutside = () => {
+      setActiveMessageMenu(null);
+    };
+
+    window.addEventListener("click", handleClickOutside);
+
+    return () => {
+      window.removeEventListener("click", handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
     const loadMessages = async () => {
       if (!chat?._id) {
         setMessages([]);
@@ -167,6 +200,7 @@ export default function ChatArea({
         setMessages(res.data || []);
       } catch (error) {
         console.error("Failed to load messages:", error);
+        setNotice("Failed to load messages");
       } finally {
         setLoadingMessages(false);
       }
@@ -179,12 +213,57 @@ export default function ChatArea({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (!notice) return;
+
+    const timer = setTimeout(() => {
+      setNotice("");
+    }, 2200);
+
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const getId = (value) => {
+    return typeof value === "object" ? value?._id : value;
+  };
+
+  const isSameId = (id1, id2) => {
+    return id1?.toString() === id2?.toString();
+  };
+
+  const isCurrentUserInList = (list = []) => {
+    return list.some((item) => isSameId(getId(item), currentUserId));
+  };
+
+  const getMessagePreview = (msg) => {
+    if (!msg) return "";
+
+    if (msg.isDeleted) return "This message was deleted";
+
+    if (msg.messageType === "voice") return "Voice message";
+
+    return msg.text || "";
+  };
+
+  const getReactionSummary = (reactions = []) => {
+    const counts = {};
+
+    reactions.forEach((reaction) => {
+      if (!reaction?.emoji) return;
+      counts[reaction.emoji] = (counts[reaction.emoji] || 0) + 1;
+    });
+
+    return Object.entries(counts);
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
 
     if (!message.trim() || !chat?._id || !otherUser?._id) return;
 
     const text = message.trim();
+    const replyToId = replyingTo?._id || null;
+
     setMessage("");
 
     try {
@@ -192,6 +271,7 @@ export default function ChatArea({
         chatId: chat._id,
         receiverId: otherUser._id,
         text,
+        replyTo: replyToId,
       });
 
       const savedMessage = res.data;
@@ -203,40 +283,17 @@ export default function ChatArea({
         message: savedMessage,
       });
 
-      // Stop typing indicator when message is sent
       socketRef.current?.emit("stopTyping", {
         receiverId: otherUser._id,
         chatId: chat._id,
       });
 
+      setReplyingTo(null);
       onMessageSent?.();
     } catch (error) {
       console.error("Failed to send message:", error);
-      alert(error.response?.data?.message || "Failed to send message");
+      setNotice(error.response?.data?.message || "Failed to send message");
       setMessage(text);
-    }
-  };
-
-  const handleDeleteMessage = async (messageId) => {
-    if (!window.confirm("Are you sure you want to delete this message?"))
-      return;
-
-    try {
-      const res = await api.delete(`/messages/${messageId}`);
-      const deletedMessage = res.data;
-
-      setMessages((prev) =>
-        prev.map((msg) => (msg._id === messageId ? deletedMessage : msg))
-      );
-
-      socketRef.current?.emit("messageUpdated", {
-        receiverId: otherUser._id,
-        message: deletedMessage,
-      });
-
-      onMessageSent?.();
-    } catch (error) {
-      console.error("Failed to delete message:", error);
     }
   };
 
@@ -258,8 +315,9 @@ export default function ChatArea({
         receiverId: otherUser._id,
         chatId: chat._id,
       });
-    }, 2000); // Stop typing after 2 seconds of inactivity
+    }, 2000);
   };
+
   const formatRecordingTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -278,7 +336,7 @@ export default function ChatArea({
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        alert("Voice recording is not supported in this browser");
+        setNotice("Voice recording is not supported in this browser");
         return;
       }
 
@@ -347,7 +405,7 @@ export default function ChatArea({
           onMessageSent?.();
         } catch (error) {
           console.error("Failed to send voice message:", error);
-          alert(
+          setNotice(
             error.response?.data?.message || "Failed to send voice message"
           );
         } finally {
@@ -368,7 +426,7 @@ export default function ChatArea({
       }, 1000);
     } catch (error) {
       console.error("Microphone error:", error);
-      alert("Microphone permission denied or unavailable");
+      setNotice("Microphone permission denied or unavailable");
       setIsRecording(false);
       stopRecordingTimer();
     }
@@ -382,6 +440,500 @@ export default function ChatArea({
       mediaRecorderRef.current.stop();
     }
   };
+
+  const clamp = (value, min, max) => {
+    return Math.min(Math.max(value, min), max);
+  };
+
+  const openMessageMenuAt = (x, y, msg, isSent) => {
+    const menuWidth = 230;
+    const menuHeight = isSent ? 455 : 395;
+    const gap = 16;
+    const padding = 12;
+
+    const rect = chatAreaRef.current?.getBoundingClientRect();
+
+    let finalX;
+
+    if (isSent) {
+      finalX = x - menuWidth - gap;
+    } else {
+      finalX = x + gap;
+    }
+
+    let finalY = y - 42;
+
+    if (rect) {
+      finalX = clamp(finalX, rect.left + padding, rect.right - menuWidth - padding);
+      finalY = clamp(finalY, rect.top + padding, rect.bottom - menuHeight - padding);
+    } else {
+      finalX = clamp(finalX, padding, window.innerWidth - menuWidth - padding);
+      finalY = clamp(finalY, padding, window.innerHeight - menuHeight - padding);
+    }
+
+    setActiveMessageMenu({
+      message: msg,
+      isSent,
+      x: finalX,
+      y: finalY,
+    });
+  };
+
+  const openMessageMenu = (event, msg, isSent) => {
+    event.preventDefault();
+    openMessageMenuAt(event.clientX, event.clientY, msg, isSent);
+  };
+
+  const closeMessageMenu = () => {
+    setActiveMessageMenu(null);
+  };
+
+  const handleLongPressStart = (event, msg, isSent) => {
+    const touch = event.touches?.[0];
+
+    longPressTimerRef.current = setTimeout(() => {
+      openMessageMenuAt(
+        touch?.clientX || 80,
+        touch?.clientY || 180,
+        msg,
+        isSent
+      );
+    }, 550);
+  };
+
+  const handleLongPressEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const updateMessageInState = (updatedMessage) => {
+    setMessages((prev) =>
+      prev.map((item) =>
+        item._id === updatedMessage._id ? updatedMessage : item
+      )
+    );
+  };
+
+  const emitUpdatedMessage = (updatedMessage) => {
+    socketRef.current?.emit("messageUpdated", {
+      receiverId: otherUser._id,
+      message: updatedMessage,
+    });
+  };
+
+  const handleReplyMessage = () => {
+    const msg = activeMessageMenu?.message;
+
+    if (!msg || msg.isDeleted) {
+      closeMessageMenu();
+      return;
+    }
+
+    setReplyingTo(msg);
+    closeMessageMenu();
+  };
+
+  const handleStartEditMessage = () => {
+    const msg = activeMessageMenu?.message;
+
+    if (!msg?._id || !msg?.text || msg?.messageType === "voice") {
+      closeMessageMenu();
+      return;
+    }
+
+    setEditingMessage(msg);
+    setEditText(msg.text);
+    closeMessageMenu();
+  };
+
+  const handleSaveEditMessage = async () => {
+    if (!editingMessage?._id) return;
+
+    if (!editText.trim()) {
+      setNotice("Message cannot be empty");
+      return;
+    }
+
+    if (editText.trim() === editingMessage.text) {
+      setEditingMessage(null);
+      setEditText("");
+      return;
+    }
+
+    try {
+      const res = await api.patch(`/messages/${editingMessage._id}/edit`, {
+        text: editText.trim(),
+      });
+
+      const updatedMessage = res.data;
+
+      updateMessageInState(updatedMessage);
+      emitUpdatedMessage(updatedMessage);
+      onMessageSent?.();
+
+      setEditingMessage(null);
+      setEditText("");
+    } catch (error) {
+      console.error("Failed to edit message:", error);
+      setNotice(error.response?.data?.message || "Failed to edit message");
+    }
+  };
+
+  const handleCopyMessage = async () => {
+    const msg = activeMessageMenu?.message;
+    const text = msg?.messageType === "voice" ? msg?.audioUrl : msg?.text;
+
+    if (!text) {
+      closeMessageMenu();
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice("Copied");
+    } catch (error) {
+      console.error("Copy failed:", error);
+      setNotice("Copy failed");
+    }
+
+    closeMessageMenu();
+  };
+
+  const handleOpenForwardModal = async () => {
+    const msg = activeMessageMenu?.message;
+
+    if (!msg || msg.isDeleted) {
+      closeMessageMenu();
+      return;
+    }
+
+    setForwardTarget(msg);
+    setForwardSearch("");
+    closeMessageMenu();
+
+    try {
+      setForwardLoading(true);
+      const res = await api.get("/users");
+      setForwardUsers(res.data || []);
+    } catch (error) {
+      console.error("Failed to load users:", error);
+      setNotice("Failed to load users");
+    } finally {
+      setForwardLoading(false);
+    }
+  };
+
+  const handleForwardToUser = async (user) => {
+    if (!forwardTarget || !user?._id) return;
+
+    try {
+      setForwardLoading(true);
+
+      const chatRes = await api.post("/chats", {
+        receiverId: user._id,
+      });
+
+      const targetChat = chatRes.data;
+
+      const messagesToForward =
+        forwardTarget._id === "__multiple__"
+          ? forwardTarget.selectedMessages || []
+          : [forwardTarget];
+
+      const forwardedResponses = await Promise.all(
+        messagesToForward.map((msg) =>
+          api.post(`/messages/${msg._id}/forward`, {
+            chatId: targetChat._id,
+            receiverId: user._id,
+          })
+        )
+      );
+
+      const forwardedMessages = forwardedResponses.map((res) => res.data);
+
+      if (targetChat._id === chat?._id) {
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((item) => item._id));
+          const newItems = forwardedMessages.filter(
+            (item) => !existingIds.has(item._id)
+          );
+
+          return [...prev, ...newItems];
+        });
+      }
+
+      forwardedMessages.forEach((forwardedMessage) => {
+        socketRef.current?.emit("sendMessage", {
+          receiverId: user._id,
+          message: forwardedMessage,
+        });
+      });
+
+      setForwardTarget(null);
+      setForwardSearch("");
+      setSelectedMessageIds([]);
+      setNotice(
+        forwardedMessages.length > 1
+          ? "Messages forwarded"
+          : "Message forwarded"
+      );
+      onMessageSent?.();
+    } catch (error) {
+      console.error("Failed to forward message:", error);
+      setNotice(error.response?.data?.message || "Failed to forward message");
+    } finally {
+      setForwardLoading(false);
+    }
+  };
+
+  const handleTogglePinMessage = async () => {
+    const msg = activeMessageMenu?.message;
+
+    if (!msg?._id) {
+      closeMessageMenu();
+      return;
+    }
+
+    try {
+      const res = await api.patch(`/messages/${msg._id}/toggle-pin`);
+      const updatedMessage = res.data;
+
+      updateMessageInState(updatedMessage);
+      emitUpdatedMessage(updatedMessage);
+      setNotice(isCurrentUserInList(msg.pinnedBy) ? "Unpinned" : "Pinned");
+    } catch (error) {
+      console.error("Failed to pin message:", error);
+      setNotice(error.response?.data?.message || "Failed to pin message");
+    } finally {
+      closeMessageMenu();
+    }
+  };
+
+  const handleToggleStarMessage = async () => {
+    const msg = activeMessageMenu?.message;
+
+    if (!msg?._id) {
+      closeMessageMenu();
+      return;
+    }
+
+    try {
+      const res = await api.patch(`/messages/${msg._id}/toggle-star`);
+      const updatedMessage = res.data;
+
+      updateMessageInState(updatedMessage);
+      emitUpdatedMessage(updatedMessage);
+      setNotice(isCurrentUserInList(msg.starredBy) ? "Unstarred" : "Starred");
+    } catch (error) {
+      console.error("Failed to star message:", error);
+      setNotice(error.response?.data?.message || "Failed to star message");
+    } finally {
+      closeMessageMenu();
+    }
+  };
+
+  const handleToggleSelectMessage = () => {
+    const msg = activeMessageMenu?.message;
+
+    if (!msg?._id) {
+      closeMessageMenu();
+      return;
+    }
+
+    setSelectedMessageIds((prev) =>
+      prev.includes(msg._id)
+        ? prev.filter((id) => id !== msg._id)
+        : [...prev, msg._id]
+    );
+
+    closeMessageMenu();
+  };
+
+  const handleOpenDeleteModal = () => {
+    const msg = activeMessageMenu?.message;
+
+    if (!msg?._id) {
+      closeMessageMenu();
+      return;
+    }
+
+    setDeleteTarget(msg);
+    closeMessageMenu();
+  };
+
+  const handleConfirmDeleteMessage = async () => {
+    if (!deleteTarget?._id) return;
+
+    try {
+      const res = await api.patch(`/messages/${deleteTarget._id}/delete`);
+      const deletedMessage = res.data;
+
+      updateMessageInState(deletedMessage);
+      emitUpdatedMessage(deletedMessage);
+      onMessageSent?.();
+
+      setDeleteTarget(null);
+      setNotice("Message deleted");
+    } catch (error) {
+      console.error("Failed to delete message:", error);
+      setNotice(error.response?.data?.message || "Failed to delete message");
+    }
+  };
+
+  const handleEmojiReaction = async (emoji) => {
+    const msg = activeMessageMenu?.message;
+
+    if (!msg?._id) {
+      closeMessageMenu();
+      return;
+    }
+
+    try {
+      const res = await api.patch(`/messages/${msg._id}/reaction`, {
+        emoji,
+      });
+
+      const updatedMessage = res.data;
+
+      updateMessageInState(updatedMessage);
+      emitUpdatedMessage(updatedMessage);
+    } catch (error) {
+      console.error("Failed to react:", error);
+      setNotice(error.response?.data?.message || "Failed to react");
+    } finally {
+      closeMessageMenu();
+    }
+  };
+
+  const handleReportPlaceholder = () => {
+    setNotice("Report will be added later");
+    closeMessageMenu();
+  };
+
+  const selectedMessages = messages.filter((msg) =>
+    selectedMessageIds.includes(msg._id)
+  );
+
+  const isSelectionMode = selectedMessageIds.length > 0;
+
+  const clearSelection = () => {
+    setSelectedMessageIds([]);
+  };
+
+  const handleBubbleClick = (msg) => {
+    if (!isSelectionMode || !msg?._id) return;
+
+    setSelectedMessageIds((prev) =>
+      prev.includes(msg._id)
+        ? prev.filter((id) => id !== msg._id)
+        : [...prev, msg._id]
+    );
+  };
+
+  const handleCopySelectedMessages = async () => {
+    if (selectedMessages.length === 0) return;
+
+    const copyText = selectedMessages
+      .map((msg) => {
+        if (msg.isDeleted) return "This message was deleted";
+        if (msg.messageType === "voice") return msg.audioUrl || "Voice message";
+        return msg.text || "";
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setNotice("Copied selected messages");
+    } catch (error) {
+      console.error("Copy selected failed:", error);
+      setNotice("Copy failed");
+    }
+  };
+
+  const handleStarSelectedMessages = async () => {
+    if (selectedMessages.length === 0) return;
+
+    try {
+      const responses = await Promise.all(
+        selectedMessages.map((msg) =>
+          api.patch(`/messages/${msg._id}/toggle-star`)
+        )
+      );
+
+      responses.forEach((res) => {
+        updateMessageInState(res.data);
+        emitUpdatedMessage(res.data);
+      });
+
+      setNotice("Updated starred messages");
+    } catch (error) {
+      console.error("Failed to star selected:", error);
+      setNotice(error.response?.data?.message || "Failed to star selected");
+    }
+  };
+
+  const handleDeleteSelectedMessages = async () => {
+    const deletableMessages = selectedMessages.filter((msg) => {
+      const senderId =
+        typeof msg.senderId === "object" ? msg.senderId._id : msg.senderId;
+
+      return senderId?.toString() === currentUserId?.toString() && !msg.isDeleted;
+    });
+
+    if (deletableMessages.length === 0) {
+      setNotice("You can delete only your sent messages");
+      return;
+    }
+
+    try {
+      const responses = await Promise.all(
+        deletableMessages.map((msg) => api.patch(`/messages/${msg._id}/delete`))
+      );
+
+      responses.forEach((res) => {
+        updateMessageInState(res.data);
+        emitUpdatedMessage(res.data);
+      });
+
+      setSelectedMessageIds([]);
+      setNotice("Selected messages deleted");
+      onMessageSent?.();
+    } catch (error) {
+      console.error("Failed to delete selected:", error);
+      setNotice(error.response?.data?.message || "Failed to delete selected");
+    }
+  };
+
+  const handleForwardSelectedMessages = async () => {
+    if (selectedMessages.length === 0) return;
+
+    setForwardTarget({
+      _id: "__multiple__",
+      text: `${selectedMessages.length} selected messages`,
+      selectedMessages,
+    });
+
+    setForwardSearch("");
+
+    try {
+      setForwardLoading(true);
+      const res = await api.get("/users");
+      setForwardUsers(res.data || []);
+    } catch (error) {
+      console.error("Failed to load users:", error);
+      setNotice("Failed to load users");
+    } finally {
+      setForwardLoading(false);
+    }
+  };
+
+  const handleDownloadSelectedMessages = () => {
+    setNotice("Download will be added later");
+  };
+
   if (!chat || !otherUser) {
     return (
       <section className="h-full flex items-center justify-center imessage-bg">
@@ -405,6 +957,17 @@ export default function ChatArea({
 
   const isOtherUserOnline = onlineUsers.includes(otherUser?._id);
   const displayOtherUser = { ...otherUser, isOnline: isOtherUserOnline };
+
+  const filteredForwardUsers = forwardUsers.filter((user) => {
+    const text = `${getUserName(user)} ${user.email || ""}`.toLowerCase();
+    const q = forwardSearch.trim().toLowerCase();
+
+    if (isSameId(user._id, currentUserId)) return false;
+
+    if (!q) return true;
+
+    return text.includes(q);
+  });
 
   return (
     <section className="h-full flex flex-col min-w-0">
@@ -440,7 +1003,7 @@ export default function ChatArea({
         </div>
       </header>
 
-      <div className="imessage-bg flex-1 overflow-y-auto px-5 py-6">
+      <div ref={chatAreaRef} className="imessage-bg flex-1 overflow-y-auto px-5 py-6">
         <div className="relative z-10 max-w-4xl mx-auto space-y-4">
           <div className="flex justify-center mb-5">
             <span className="px-3 py-1 rounded-full bg-white/84 border border-slate-200 text-xs font-black text-slate-400">
@@ -480,6 +1043,10 @@ export default function ChatArea({
 
               const isFirstInGroup = !previous || previousSender !== senderId;
               const isLastInGroup = !next || nextSender !== senderId;
+              const isSelected = selectedMessageIds.includes(msg._id);
+              const reactionSummary = getReactionSummary(msg.reactions);
+              const isPinned = isCurrentUserInList(msg.pinnedBy);
+              const isStarred = isCurrentUserInList(msg.starredBy);
 
               return (
                 <div
@@ -488,22 +1055,36 @@ export default function ChatArea({
                     isSent ? "justify-end" : "justify-start"
                   } group items-center gap-2`}
                 >
-                  {isSent && !msg.isDeleted && (
+                  {isSelectionMode && (
                     <button
-                      onClick={() => handleDeleteMessage(msg._id || msg.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full shrink-0"
-                      title="Delete message"
+                      type="button"
+                      onClick={() => handleBubbleClick(msg)}
+                      className={`w-6 h-6 rounded-md border flex items-center justify-center shrink-0 ${
+                        isSelected
+                          ? "bg-emerald-500 border-emerald-500 text-white"
+                          : "bg-white/80 border-slate-300 text-transparent"
+                      }`}
                     >
-                      <Trash2 size={16} />
+                      <Check size={16} />
                     </button>
                   )}
+
                   <div
                     className={`max-w-[76%] flex flex-col ${
                       isSent ? "items-end" : "items-start"
                     }`}
                   >
                     <div
-                      className={`px-4 py-2.5 text-[15px] leading-6 ${
+                      onClick={() => handleBubbleClick(msg)}
+                      onContextMenu={(event) =>
+                        openMessageMenu(event, msg, isSent)
+                      }
+                      onTouchStart={(event) =>
+                        handleLongPressStart(event, msg, isSent)
+                      }
+                      onTouchEnd={handleLongPressEnd}
+                      onTouchMove={handleLongPressEnd}
+                      className={`px-4 py-2.5 text-[15px] leading-6 cursor-pointer select-none ${
                         isSent ? "message-out" : "message-in"
                       } ${
                         isSent
@@ -525,8 +1106,23 @@ export default function ChatArea({
                                 ? "rounded-br-[22px] rounded-bl-[6px]"
                                 : "rounded-b-[10px]"
                             }`
-                      }`}
+                      } ${isSelected ? "ring-2 ring-emerald-400/60 bg-emerald-50/40" : ""}`}
                     >
+                      {!msg.isDeleted && msg.replyTo && (
+                        <div className="mb-2 px-3 py-2 rounded-[14px] bg-white/20 border-l-2 border-white/60 text-xs opacity-85 max-w-[260px]">
+                          <div className="font-black mb-0.5">Replying to</div>
+                          <div className="truncate">
+                            {getMessagePreview(msg.replyTo)}
+                          </div>
+                        </div>
+                      )}
+
+                      {!msg.isDeleted && msg.isForwarded && (
+                        <div className="mb-1 text-xs opacity-70 font-bold">
+                          Forwarded
+                        </div>
+                      )}
+
                       {msg.isDeleted ? (
                         "This message was deleted"
                       ) : msg.messageType === "voice" && msg.audioUrl ? (
@@ -546,7 +1142,27 @@ export default function ChatArea({
                       ) : (
                         msg.text
                       )}
+
+                      {!msg.isDeleted && (isPinned || isStarred) && (
+                        <div className="mt-1 flex gap-1 text-xs opacity-75">
+                          {isPinned && <span>📌</span>}
+                          {isStarred && <span>⭐</span>}
+                        </div>
+                      )}
                     </div>
+
+                    {reactionSummary.length > 0 && !msg.isDeleted && (
+                      <div className="mt-1 flex gap-1 px-1">
+                        {reactionSummary.map(([emoji, count]) => (
+                          <span
+                            key={emoji}
+                            className="px-2 py-0.5 rounded-full bg-white border border-slate-200 shadow-sm text-xs"
+                          >
+                            {emoji} {count}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     {isLastInGroup && (
                       <div className="flex items-center gap-1.5 mt-1 px-1 text-xs text-slate-400">
@@ -558,6 +1174,10 @@ export default function ChatArea({
                               })
                             : ""}
                         </span>
+
+                        {msg.isEdited && !msg.isDeleted && <span>edited</span>}
+
+                        {isSelected && <span>selected</span>}
 
                         {isSent && (
                           <>
@@ -598,7 +1218,369 @@ export default function ChatArea({
         </div>
       </div>
 
-      <footer className="px-4 py-3 bg-white/74 backdrop-blur-2xl border-t border-slate-200/70">
+      {activeMessageMenu && (
+        <div
+          className="fixed z-[9999]"
+          style={{
+            left: activeMessageMenu.x,
+            top: activeMessageMenu.y,
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="mb-2 flex items-center gap-1 rounded-full bg-white shadow-[0_14px_40px_rgba(15,23,42,0.18)] border border-slate-200 px-2 py-1.5">
+            {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => handleEmojiReaction(emoji)}
+                className="w-8 h-8 rounded-full hover:bg-slate-100 text-lg flex items-center justify-center transition-transform hover:scale-125"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+
+          <div className="w-[210px] rounded-[18px] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.22)] border border-slate-200 overflow-hidden py-2">
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
+              onClick={handleReplyMessage}
+            >
+              <Reply size={18} />
+              <span>Reply</span>
+            </button>
+
+            {activeMessageMenu.isSent &&
+              !activeMessageMenu.message?.isDeleted &&
+              activeMessageMenu.message?.messageType !== "voice" && (
+                <button
+                  type="button"
+                  className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
+                  onClick={handleStartEditMessage}
+                >
+                  <Pencil size={18} />
+                  <span>Edit</span>
+                </button>
+              )}
+
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
+              onClick={handleCopyMessage}
+            >
+              <Copy size={18} />
+              <span>Copy</span>
+            </button>
+
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
+              onClick={handleOpenForwardModal}
+            >
+              <Forward size={18} />
+              <span>Forward</span>
+            </button>
+
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
+              onClick={handleTogglePinMessage}
+            >
+              <Pin size={18} />
+              <span>
+                {isCurrentUserInList(activeMessageMenu.message?.pinnedBy)
+                  ? "Unpin"
+                  : "Pin"}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
+              onClick={handleToggleStarMessage}
+            >
+              <Star size={18} />
+              <span>
+                {isCurrentUserInList(activeMessageMenu.message?.starredBy)
+                  ? "Unstar"
+                  : "Star"}
+              </span>
+            </button>
+
+            <div className="h-px bg-slate-200 my-1" />
+
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
+              onClick={handleToggleSelectMessage}
+            >
+              <SquareCheck size={18} />
+              <span>
+                {selectedMessageIds.includes(activeMessageMenu.message?._id)
+                  ? "Unselect"
+                  : "Select"}
+              </span>
+            </button>
+
+            <div className="h-px bg-slate-200 my-1" />
+
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-400"
+              onClick={handleReportPlaceholder}
+            >
+              <Flag size={18} />
+              <span>Report</span>
+            </button>
+
+            {activeMessageMenu.isSent && (
+              <button
+                type="button"
+                className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-red-50 text-red-600"
+                onClick={handleOpenDeleteModal}
+              >
+                <Trash2 size={18} />
+                <span>Delete</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {notice && (
+        <div className="fixed left-1/2 bottom-24 -translate-x-1/2 z-[10000] px-4 py-2 rounded-full bg-slate-950 text-white text-sm font-bold shadow-xl">
+          {notice}
+        </div>
+      )}
+
+      {editingMessage && (
+        <div className="fixed inset-0 z-[10000] bg-slate-950/30 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-[24px] bg-white shadow-2xl border border-slate-200 p-5">
+            <h3 className="text-lg font-black text-slate-950 mb-3">
+              Edit message
+            </h3>
+
+            <textarea
+              value={editText}
+              onChange={(event) => setEditText(event.target.value)}
+              className="w-full min-h-28 rounded-[18px] border border-slate-200 px-4 py-3 outline-none focus:ring-2 focus:ring-[#6366F1]/30"
+              autoFocus
+            />
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingMessage(null);
+                  setEditText("");
+                }}
+                className="px-4 py-2 rounded-full font-bold text-slate-500 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveEditMessage}
+                className="px-5 py-2 rounded-full apple-primary font-black"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[10000] bg-slate-950/30 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="w-full max-w-sm rounded-[24px] bg-white shadow-2xl border border-slate-200 p-5">
+            <h3 className="text-lg font-black text-slate-950 mb-2">
+              Delete message?
+            </h3>
+
+            <p className="text-sm text-slate-500 leading-6">
+              This will replace your message with a deleted-message placeholder.
+            </p>
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 rounded-full font-bold text-slate-500 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmDeleteMessage}
+                className="px-5 py-2 rounded-full bg-red-500 text-white font-black hover:bg-red-600"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {forwardTarget && (
+        <div className="fixed inset-0 z-[10000] bg-slate-950/30 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="w-full max-w-md max-h-[80vh] rounded-[24px] bg-white shadow-2xl border border-slate-200 p-5 flex flex-col">
+            <h3 className="text-lg font-black text-slate-950 mb-3">
+              Forward message
+            </h3>
+
+            <div className="mb-3 rounded-[18px] bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-600">
+              <span className="font-black text-slate-700">Message: </span>
+              {forwardTarget?._id === "__multiple__"
+                ? `${forwardTarget.selectedMessages?.length || 0} selected messages`
+                : getMessagePreview(forwardTarget)}
+            </div>
+
+            <input
+              value={forwardSearch}
+              onChange={(event) => setForwardSearch(event.target.value)}
+              placeholder="Search users"
+              className="apple-input w-full h-11 rounded-full px-4 text-slate-900 placeholder:text-slate-400 mb-3"
+              autoFocus
+            />
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {forwardLoading ? (
+                <div className="py-8 text-center text-slate-400 font-bold">
+                  Loading...
+                </div>
+              ) : filteredForwardUsers.length === 0 ? (
+                <div className="py-8 text-center text-slate-400 font-bold">
+                  No users found
+                </div>
+              ) : (
+                filteredForwardUsers.map((user) => (
+                  <button
+                    key={user._id}
+                    type="button"
+                    onClick={() => handleForwardToUser(user)}
+                    className="w-full flex items-center gap-3 p-3 rounded-[18px] hover:bg-slate-50 text-left"
+                  >
+                    <Avatar user={user} />
+                    <div className="min-w-0">
+                      <div className="font-black text-slate-950 truncate">
+                        {getUserName(user)}
+                      </div>
+                      <div className="text-sm text-slate-500 truncate">
+                        {user.email}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setForwardTarget(null);
+                  setForwardSearch("");
+                }}
+                className="px-4 py-2 rounded-full font-bold text-slate-500 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSelectionMode && (
+        <div className="h-[72px] px-5 bg-white/94 backdrop-blur-2xl border-t border-slate-200/70 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-900"
+            >
+              <X size={24} />
+            </button>
+
+            <span className="font-black text-slate-950">
+              {selectedMessageIds.length} selected
+            </span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={handleCopySelectedMessages}
+              className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-900"
+              title="Copy"
+            >
+              <Copy size={23} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleStarSelectedMessages}
+              className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-900"
+              title="Star"
+            >
+              <Star size={23} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDeleteSelectedMessages}
+              className="w-10 h-10 rounded-full hover:bg-red-50 flex items-center justify-center text-slate-900 hover:text-red-600"
+              title="Delete"
+            >
+              <Trash2 size={23} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleForwardSelectedMessages}
+              className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-900"
+              title="Forward"
+            >
+              <Forward size={23} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadSelectedMessages}
+              className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400"
+              title="Download"
+            >
+              <Download size={23} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <footer
+        className={`px-4 py-3 bg-white/74 backdrop-blur-2xl border-t border-slate-200/70 ${
+          isSelectionMode ? "hidden" : ""
+        }`}
+      >
+        {replyingTo && (
+          <div className="mb-2 mx-12 rounded-[18px] bg-white border border-slate-200 shadow-sm px-4 py-2 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-black text-[#6366F1]">Replying to</div>
+              <div className="text-sm text-slate-600 truncate">
+                {getMessagePreview(replyingTo)}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setReplyingTo(null)}
+              className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 font-black"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSendMessage} className="flex items-center gap-2">
           <button
             type="button"
