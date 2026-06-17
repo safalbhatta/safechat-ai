@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useState, useCallback } from "react";
 import { ArrowLeft } from "lucide-react";
 import ConversationList from "../components/messaging/ConversationList.jsx";
 import ChatArea from "../components/messaging/ChatArea.jsx";
@@ -9,6 +9,7 @@ export default function Messages() {
   const [showConversationList, setShowConversationList] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [typingChats, setTypingChats] = useState({});
 
   const handleSelectChat = (chat, user) => {
     setSelectedChat(chat);
@@ -19,6 +20,10 @@ export default function Messages() {
   const refreshChats = () => {
     setReloadKey((prev) => prev + 1);
   };
+
+  const handleTypingUpdate = useCallback((data) => {
+    setTypingChats((prev) => ({ ...prev, [data.chatId]: data.isTyping }));
+  }, []);
 
   return (
     <div className="h-full flex overflow-hidden">
@@ -32,6 +37,7 @@ export default function Messages() {
           onSelectChat={handleSelectChat}
           reloadKey={reloadKey}
           onlineUsers={onlineUsers}
+          typingChats={typingChats}
         />
       </div>
 
@@ -54,6 +60,7 @@ export default function Messages() {
           onMessageSent={refreshChats}
           onlineUsers={onlineUsers}
           onOnlineUsersUpdate={setOnlineUsers}
+          onTypingUpdate={handleTypingUpdate}
         />
       </div>
     </div>

@@ -57,6 +57,7 @@ export default function ChatArea({
   onMessageSent,
   onlineUsers = [],
   onOnlineUsersUpdate,
+  onTypingUpdate,
 }) {
   const currentUser = getCurrentUser();
   const currentUserId = currentUser?._id || currentUser?.id;
@@ -137,19 +138,21 @@ export default function ChatArea({
       if (chat?._id && data.chatId === chat._id) {
         setIsTyping(true);
       }
+      onTypingUpdate?.({ chatId: data.chatId, isTyping: true });
     });
 
     socket.on("stopTyping", (data) => {
       if (chat?._id && data.chatId === chat._id) {
         setIsTyping(false);
       }
+      onTypingUpdate?.({ chatId: data.chatId, isTyping: false });
     });
 
     return () => {
       socket.disconnect();
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [currentUserId, chat?._id, onOnlineUsersUpdate]);
+  }, [currentUserId, chat?._id, onOnlineUsersUpdate, onTypingUpdate]);
 
   useEffect(() => {
     const loadMessages = async () => {

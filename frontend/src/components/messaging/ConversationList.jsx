@@ -49,6 +49,7 @@ export default function ConversationList({
   onSelectChat,
   reloadKey,
   onlineUsers = [],
+  typingChats = {},
 }) {
   const currentUser = getCurrentUser();
   const currentUserId = currentUser?._id || currentUser?.id;
@@ -298,8 +299,16 @@ export default function ConversationList({
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <p className="flex-1 truncate text-sm text-slate-500">
-                            {chat.lastMessage || "No messages yet"}
+                          <p className="flex-1 truncate text-sm">
+                            {typingChats[chat._id] ? (
+                              <span className="text-[#6366F1] font-semibold italic">
+                                Typing...
+                              </span>
+                            ) : (
+                              <span className="text-slate-500">
+                                {chat.lastMessage || "No messages yet"}
+                              </span>
+                            )}
                           </p>
 
                           {chat.unreadCount > 0 && (
