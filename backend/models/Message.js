@@ -110,6 +110,13 @@ const messageSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    
+    deletedFor: [
+  {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+],
 
     isFlagged: {
       type: Boolean,

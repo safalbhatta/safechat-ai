@@ -9,6 +9,7 @@ const {
   getMessages,
   editMessage,
   deleteMessage,
+  deleteMessageForMe,
   forwardMessage,
   togglePinMessage,
   toggleStarMessage,
@@ -59,6 +60,7 @@ router.get("/flags/list", protect, getFlaggedMessages);
 
 router.patch("/:messageId/edit", protect, editMessage);
 router.patch("/:messageId/delete", protect, deleteMessage);
+router.patch("/:messageId/delete-for-me", protect, deleteMessageForMe);
 router.post("/:messageId/forward", protect, forwardMessage);
 router.patch("/:messageId/toggle-pin", protect, togglePinMessage);
 router.patch("/:messageId/toggle-star", protect, toggleStarMessage);

@@ -764,23 +764,47 @@ export default function ChatArea({
   };
 
   const handleConfirmDeleteMessage = async () => {
-    if (!deleteTarget?._id) return;
+  if (!deleteTarget?._id) return;
 
-    try {
-      const res = await api.patch(`/messages/${deleteTarget._id}/delete`);
-      const deletedMessage = res.data;
+  try {
+    const res = await api.patch(`/messages/${deleteTarget._id}/delete`);
+    const deletedMessage = res.data;
 
-      updateMessageInState(deletedMessage);
-      emitUpdatedMessage(deletedMessage);
-      onMessageSent?.();
+    updateMessageInState(deletedMessage);
 
-      setDeleteTarget(null);
-      setNotice("Message deleted");
-    } catch (error) {
-      console.error("Failed to delete message:", error);
-      setNotice(error.response?.data?.message || "Failed to delete message");
-    }
-  };
+    socketRef.current?.emit("messageUpdated", {
+      receiverId: otherUser._id,
+      message: deletedMessage,
+    });
+
+    onMessageSent?.();
+
+    setDeleteTarget(null);
+    setNotice("Message deleted for everyone");
+  } catch (error) {
+    console.error("Failed to delete message for everyone:", error);
+    setNotice(error.response?.data?.message || "Failed to delete for everyone");
+  }
+};
+
+  const handleDeleteMessageForMe = async () => {
+  if (!deleteTarget?._id) return;
+
+  try {
+    await api.patch(`/messages/${deleteTarget._id}/delete-for-me`);
+
+    setMessages((prev) =>
+      prev.filter((item) => item._id !== deleteTarget._id)
+    );
+
+    setDeleteTarget(null);
+    setNotice("Message deleted for you");
+    onMessageSent?.();
+  } catch (error) {
+    console.error("Failed to delete message for me:", error);
+    setNotice(error.response?.data?.message || "Failed to delete for me");
+  }
+};
 
   const handleEmojiReaction = async (emoji) => {
     const msg = activeMessageMenu?.message;
@@ -957,7 +981,14 @@ export default function ChatArea({
 
   const isOtherUserOnline = onlineUsers.includes(otherUser?._id);
   const displayOtherUser = { ...otherUser, isOnline: isOtherUserOnline };
+const deleteTargetSenderId =
+  typeof deleteTarget?.senderId === "object"
+    ? deleteTarget?.senderId?._id
+    : deleteTarget?.senderId;
 
+const canDeleteTargetForEveryone =
+  deleteTargetSenderId?.toString() === currentUserId?.toString() &&
+  !deleteTarget?.isDeleted;
   const filteredForwardUsers = forwardUsers.filter((user) => {
     const text = `${getUserName(user)} ${user.email || ""}`.toLowerCase();
     const q = forwardSearch.trim().toLowerCase();
@@ -1333,16 +1364,14 @@ export default function ChatArea({
               <span>Report</span>
             </button>
 
-            {activeMessageMenu.isSent && (
-              <button
-                type="button"
-                className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-red-50 text-red-600"
-                onClick={handleOpenDeleteModal}
-              >
-                <Trash2 size={18} />
-                <span>Delete</span>
-              </button>
-            )}
+            <button
+  type="button"
+  className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-red-50 text-red-600"
+  onClick={handleOpenDeleteModal}
+>
+  <Trash2 size={18} />
+  <span>Delete</span>
+</button>
           </div>
         </div>
       )}
@@ -1402,23 +1431,33 @@ export default function ChatArea({
               This will replace your message with a deleted-message placeholder.
             </p>
 
-            <div className="flex justify-end gap-2 mt-5">
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 rounded-full font-bold text-slate-500 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
+            <div className="flex flex-col gap-2 mt-5">
+  <button
+    type="button"
+    onClick={handleDeleteMessageForMe}
+    className="w-full px-5 py-3 rounded-full bg-slate-100 text-slate-900 font-black hover:bg-slate-200"
+  >
+    Delete for me
+  </button>
 
-              <button
-                type="button"
-                onClick={handleConfirmDeleteMessage}
-                className="px-5 py-2 rounded-full bg-red-500 text-white font-black hover:bg-red-600"
-              >
-                Delete
-              </button>
-            </div>
+  {canDeleteTargetForEveryone && (
+    <button
+      type="button"
+      onClick={handleConfirmDeleteMessage}
+      className="w-full px-5 py-3 rounded-full bg-red-500 text-white font-black hover:bg-red-600"
+    >
+      Delete for everyone
+    </button>
+  )}
+
+  <button
+    type="button"
+    onClick={() => setDeleteTarget(null)}
+    className="w-full px-5 py-3 rounded-full font-bold text-slate-500 hover:bg-slate-100"
+  >
+    Cancel
+  </button>
+</div>
           </div>
         </div>
       )}

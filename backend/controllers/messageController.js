@@ -225,8 +225,9 @@ const getMessages = async (req, res) => {
     );
 
     const messageQuery = {
-      chatId,
-    };
+  chatId,
+  deletedFor: { $ne: currentUserId },
+};
 
     if (clearedEntry?.clearedAt) {
       messageQuery.createdAt = {
@@ -324,6 +325,11 @@ const deleteMessage = async (req, res) => {
         message: "You can delete only your own messages",
       });
     }
+    if (message.isDeleted) {
+  return res.status(400).json({
+    message: "This message is already deleted",
+  });
+}
 
     message.text = "This message was deleted";
     message.audioUrl = "";
@@ -546,7 +552,34 @@ const reactToMessage = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+const deleteMessageForMe = async (req, res) => {
+  try {
+    const { messageId } = req.params;
 
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (!checkMessageAccess(message, req.user._id)) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    if (!isUserInList(message.deletedFor, req.user._id)) {
+      message.deletedFor.push(req.user._id);
+    }
+
+    await message.save();
+
+    res.json({
+      message: "Message deleted for you",
+      messageId: message._id,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 const flagMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
@@ -710,6 +743,7 @@ module.exports = {
   getMessages,
   editMessage,
   deleteMessage,
+  deleteMessageForMe,
   forwardMessage,
   togglePinMessage,
   toggleStarMessage,
