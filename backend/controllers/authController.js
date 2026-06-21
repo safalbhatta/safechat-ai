@@ -1,4 +1,4 @@
-﻿const bcrypt = require("bcryptjs");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
@@ -39,8 +39,12 @@ const registerUser = async (req, res) => {
 
     res.status(201).json({
       _id: user._id,
+      name: user.name,
       username: user.username,
       email: user.email,
+      bio: user.bio,
+      profilePic: user.profilePic,
+      privacy: user.privacy,
       token: generateToken(user._id),
     });
   } catch (error) {
@@ -71,8 +75,12 @@ const loginUser = async (req, res) => {
 
     res.json({
       _id: user._id,
+      name: user.name,
       username: user.username,
       email: user.email,
+      bio: user.bio,
+      profilePic: user.profilePic,
+      privacy: user.privacy,
       token: generateToken(user._id),
     });
   } catch (error) {

@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, MessageSquare } from "lucide-react";
 import { motion } from "motion/react";
@@ -34,8 +34,8 @@ export default function Login() {
         status: "online",
       };
 
-      localStorage.setItem("token", res.data.token);
-      localStorage.setItem("user", JSON.stringify(user));
+      sessionStorage.setItem("token", res.data.token);
+      sessionStorage.setItem("user", JSON.stringify(user));
 
       navigate("/app");
     } catch (err) {

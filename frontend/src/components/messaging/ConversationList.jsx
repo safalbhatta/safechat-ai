@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
@@ -34,11 +34,11 @@ function initials(name = "") {
 }
 
 function getCurrentUser() {
-  return JSON.parse(localStorage.getItem("user") || "null");
+  return JSON.parse(sessionStorage.getItem("user") || "null");
 }
 
 function getUserName(user) {
-  return user?.username || user?.name || user?.email || "Unknown User";
+  return user?.name || user?.username || user?.email || "Unknown User";
 }
 
 function Avatar({ user }) {

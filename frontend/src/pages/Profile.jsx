@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import {
   Camera,
   MapPin,
@@ -16,7 +16,7 @@ import {
 import { currentUser as fallbackUser } from "../data/mockData.js";
 
 function getLoggedInUser() {
-  const savedUser = JSON.parse(localStorage.getItem("user") || "null");
+  const savedUser = JSON.parse(sessionStorage.getItem("user") || "null");
 
   if (!savedUser) return fallbackUser;
 

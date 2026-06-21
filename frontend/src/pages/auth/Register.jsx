@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, User, MessageSquare } from "lucide-react";
 import { motion } from "motion/react";
@@ -36,7 +36,7 @@ export default function Register() {
     setLoading(true);
 
     try {
-      await api.post("/auth/register", {
+      const res = await api.post("/auth/register", {
         username: formData.name,
         email: formData.email,
         password: formData.password,

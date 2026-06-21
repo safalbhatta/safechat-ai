@@ -1,4 +1,6 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
 
 :root {
   --background: #f5f7fb;
@@ -260,5 +262,182 @@ button:active {
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 900;
+}
+
+/* ==========================================================================
+   APP-WIDE DARK MODE OVERRIDES (Tailwind v4 Selector support)
+   ========================================================================== */
+
+.dark {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --muted: #94a3b8;
+  --border: rgba(51, 65, 85, 0.5);
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at 14% 8%, rgba(139, 92, 246, 0.12), transparent 30%),
+    radial-gradient(circle at 88% 12%, rgba(99, 102, 241, 0.10), transparent 32%),
+    linear-gradient(135deg, #090d16 0%, #0f172a 50%, #0c101a 100%) !important;
+  color: var(--foreground) !important;
+}
+
+.dark .apple-shell {
+  background: rgba(15, 23, 42, 0.72) !important;
+  border-color: rgba(51, 65, 85, 0.45) !important;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.4),
+    0 8px 28px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.dark .apple-sidebar {
+  background: rgba(15, 23, 42, 0.66) !important;
+  border-color: rgba(51, 65, 85, 0.45) !important;
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.dark .apple-panel {
+  background: rgba(15, 23, 42, 0.58) !important;
+  border-color: rgba(51, 65, 85, 0.4) !important;
+}
+
+.dark .apple-card {
+  background: rgba(30, 41, 59, 0.8) !important;
+  border-color: rgba(51, 65, 85, 0.6) !important;
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
+}
+
+.dark .apple-card-hover:hover {
+  background: rgba(30, 41, 59, 0.95) !important;
+  border-color: rgba(99, 102, 241, 0.3) !important;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.dark .apple-input {
+  background: rgba(15, 23, 42, 0.88) !important;
+  border-color: rgba(51, 65, 85, 0.7) !important;
+  color: #f8fafc !important;
+}
+
+.dark .apple-input:focus {
+  border-color: rgba(99, 102, 241, 0.6) !important;
+  box-shadow:
+    0 0 0 4px rgba(99, 102, 241, 0.10),
+    0 12px 28px rgba(0, 0, 0, 0.3) !important;
+}
+
+.dark .imessage-bg {
+  background:
+    radial-gradient(circle at 20% 18%, rgba(99, 102, 241, 0.05), transparent 30%),
+    radial-gradient(circle at 84% 10%, rgba(120, 119, 255, 0.05), transparent 32%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(9, 15, 30, 0.96)) !important;
+}
+
+.dark .message-in {
+  background: rgba(30, 41, 59, 0.96) !important;
+  color: #f8fafc !important;
+  border-color: rgba(51, 65, 85, 0.6) !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2) !important;
+}
+
+.dark .message-out {
+  background: linear-gradient(180deg, #8B5CF6 0%, #6366F1 100%) !important;
+  color: white !important;
+  box-shadow: 0 12px 30px rgba(99, 102, 241, 0.2) !important;
+}
+
+.dark .premium-glass,
+.dark .chater-panel,
+.dark .glass-card,
+.dark .chater-card {
+  background: rgba(15, 23, 42, 0.72) !important;
+  border-color: rgba(51, 65, 85, 0.45) !important;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.25) !important;
+}
+
+.dark .premium-card,
+.dark .page-card {
+  background: rgba(30, 41, 59, 0.84) !important;
+  border-color: rgba(51, 65, 85, 0.5) !important;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.15) !important;
+}
+
+.dark .page-premium {
+  background:
+    radial-gradient(circle at 14% 8%, rgba(139, 92, 246, 0.06), transparent 30%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.76), rgba(9, 13, 24, 0.92)) !important;
+}
+
+.dark .input-premium {
+  background: rgba(15, 23, 42, 0.88) !important;
+  border-color: rgba(51, 65, 85, 0.7) !important;
+  color: #f8fafc !important;
+}
+
+.dark text-slate-950,
+.dark .text-slate-950,
+.dark h1,
+.dark h2,
+.dark h3 {
+  color: #f8fafc !important;
+}
+
+.dark text-slate-900,
+.dark .text-slate-900 {
+  color: #f1f5f9 !important;
+}
+
+.dark text-slate-600,
+.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark text-slate-500,
+.dark .text-slate-500,
+.dark p {
+  color: #94a3b8 !important;
+}
+
+.dark .text-slate-400 {
+  color: #64748b !important;
+}
+
+.dark border-slate-200,
+.dark .border-slate-200,
+.dark .border-slate-200\/70,
+.dark .border-slate-200\/60 {
+  border-color: rgba(51, 65, 85, 0.5) !important;
+}
+
+.dark .hover\:bg-white\/88:hover {
+  background-color: rgba(30, 41, 59, 0.6) !important;
+}
+
+.dark .bg-white {
+  background-color: rgba(30, 41, 59, 0.9) !important;
+}
+
+.dark .bg-white\/80 {
+  background-color: rgba(15, 23, 42, 0.8) !important;
+}
+
+.dark .bg-white\/70 {
+  background-color: rgba(15, 23, 42, 0.7) !important;
+}
+
+.dark .bg-white\/40 {
+  background-color: rgba(15, 23, 42, 0.4) !important;
+}
+
+.dark .bg-slate-50\/50 {
+  background-color: rgba(9, 15, 30, 0.1) !important;
 }
 

@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSocket } from "../../context/SocketContext.jsx";
 import {
   Phone,
@@ -38,11 +38,11 @@ function initials(name = "") {
 }
 
 function getCurrentUser() {
-  return JSON.parse(localStorage.getItem("user") || "null");
+  return JSON.parse(sessionStorage.getItem("user") || "null");
 }
 
 function getUserName(user) {
-  return user?.username || user?.name || user?.email || "Unknown User";
+  return user?.name || user?.username || user?.email || "Unknown User";
 }
 
 function Avatar({ user }) {
@@ -1027,7 +1027,7 @@ export default function ChatArea({
                   isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
                 }`}
               />
-              <span>{isOtherUserOnline ? "Online" : otherUser?.email}</span>
+              <span>{isOtherUserOnline ? "Online" : "Offline"} {otherUser?.username ? `• @${otherUser.username}` : ""}</span>
             </div>
           </div>
         </div>
