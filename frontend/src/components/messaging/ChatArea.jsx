@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { useSocket } from "../../context/SocketContext.jsx";
 import {
   Phone,
   Video,
   Info,
+  Search,
   Send,
   Smile,
   Paperclip,
@@ -23,6 +24,8 @@ import {
   Pencil,
   X,
   Download,
+   Ban,
+  MinusCircle,
 } from "lucide-react";
 import api from "../../lib/api.js";
 
@@ -89,7 +92,9 @@ export default function ChatArea({
   const [forwardUsers, setForwardUsers] = useState([]);
   const [forwardSearch, setForwardSearch] = useState("");
   const [forwardLoading, setForwardLoading] = useState(false);
-  const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+ const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
   const messagesEndRef = useRef(null);
   const chatAreaRef = useRef(null);
@@ -170,16 +175,17 @@ export default function ChatArea({
   }, [currentUserId, chat?._id, onMessageSent, onTypingUpdate, globalSocket]);
 
   useEffect(() => {
-    const handleClickOutside = () => {
-      setActiveMessageMenu(null);
-    };
+  const handleClickOutside = () => {
+    setActiveMessageMenu(null);
+    setEmojiPickerOpen(false);
+  };
 
-    window.addEventListener("click", handleClickOutside);
+  window.addEventListener("click", handleClickOutside);
 
-    return () => {
-      window.removeEventListener("click", handleClickOutside);
-    };
-  }, []);
+  return () => {
+    window.removeEventListener("click", handleClickOutside);
+  };
+}, []);
 
   useEffect(() => {
     const loadMessages = async () => {
@@ -963,7 +969,67 @@ export default function ChatArea({
   const handleDownloadSelectedMessages = () => {
     setNotice("Download will be added later");
   };
+const emojiOptions = [
+  "😀", "😂", "😍", "🥰", "😎", "😭", "😡", "😮",
+  "👍", "👎", "👏", "🙏", "💪", "🔥", "❤️", "💔",
+  "🎉", "✨", "✅", "❌", "💯", "🤝", "👀", "😴",
+];
 
+const handlePickEmoji = (emoji) => {
+  setMessage((prev) => `${prev}${emoji}`);
+  setEmojiPickerOpen(false);
+};
+const handleClearCurrentChat = async () => {
+  if (!chat?._id) return;
+
+  try {
+    await api.patch(`/chats/${chat._id}/clear`);
+
+    setMessages([]);
+    setNotice("Chat cleared");
+    onMessageSent?.();
+
+    window.dispatchEvent(
+      new CustomEvent("safechat:chat-cleared", {
+        detail: {
+          chatId: chat._id,
+        },
+      })
+    );
+  } catch (error) {
+    console.error("Failed to clear chat:", error);
+    setNotice(error.response?.data?.message || "Failed to clear chat");
+  }
+};
+
+const handleBlockCurrentChat = async () => {
+  if (!chat?._id) return;
+
+  try {
+    await api.patch(`/chats/${chat._id}/toggle-block`);
+    setNotice("Chat blocked");
+    onMessageSent?.();
+  } catch (error) {
+    console.error("Failed to block chat:", error);
+    setNotice(error.response?.data?.message || "Failed to block chat");
+  }
+};
+
+const handleDeleteCurrentChat = async () => {
+  if (!chat?._id) return;
+
+  try {
+    await api.patch(`/chats/${chat._id}/delete-for-me`);
+
+    setMessages([]);
+    setProfilePanelOpen(false);
+    setNotice("Chat deleted");
+    onMessageSent?.();
+  } catch (error) {
+    console.error("Failed to delete chat:", error);
+    setNotice(error.response?.data?.message || "Failed to delete chat");
+  }
+};
   if (!chat || !otherUser) {
     return (
       <section className="h-full flex items-center justify-center imessage-bg">
@@ -1011,38 +1077,65 @@ export default function ChatArea({
   });
 
   return (
-    <section className="h-full flex flex-col min-w-0">
-      <header className="h-[82px] px-6 flex items-center justify-between bg-white/70 backdrop-blur-2xl border-b border-slate-200/70">
-        <div className="flex items-center gap-3 min-w-0">
-          <Avatar user={displayOtherUser} />
+    <section
+  className="h-full flex flex-col min-w-0 relative overflow-hidden transition-[padding] duration-300"
+  style={{
+    paddingRight: profilePanelOpen ? "clamp(380px, 45%, 620px)" : "0px",
+  }}
+>
+    <header className="h-[82px] px-6 flex items-center justify-between bg-white/70 backdrop-blur-2xl border-b border-slate-200/70">
+  <button
+    type="button"
+    onClick={() => setProfilePanelOpen(true)}
+    className="flex-1 min-w-0 flex items-center gap-3 text-left rounded-[24px] px-2 py-2 -ml-2 hover:bg-slate-50/80 transition"
+    title="Open contact info"
+  >
+    <Avatar user={displayOtherUser} />
 
-          <div className="min-w-0">
-            <h2 className="font-black text-lg text-slate-950 truncate">
-              {getUserName(otherUser)}
-            </h2>
+    <div className="min-w-0">
+      <h2 className="font-black text-lg text-slate-950 truncate">
+        {getUserName(otherUser)}
+      </h2>
 
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
-                }`}
-              />
-              <span>{isOtherUserOnline ? "Online" : "Offline"} {otherUser?.username ? `• @${otherUser.username}` : ""}</span>
-            </div>
-          </div>
-        </div>
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <span
+          className={`w-2 h-2 rounded-full ${
+            isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
+          }`}
+        />
+        <span className="truncate">
+          {isOtherUserOnline ? "Online" : "Offline"}
+          {otherUser?.username ? ` • @${otherUser.username}` : ""}
+        </span>
+      </div>
+    </div>
+  </button>
 
-        <div className="flex gap-2">
-          {[Phone, Video, Info].map((Icon, index) => (
-            <button
-              key={index}
-              className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
-            >
-              <Icon size={20} />
-            </button>
-          ))}
-        </div>
-      </header>
+  <div className="flex gap-2 shrink-0">
+    <button
+      type="button"
+      className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
+    >
+      <Phone size={20} />
+    </button>
+
+    <button
+      type="button"
+      className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
+    >
+      <Video size={20} />
+    </button>
+
+    <button
+      type="button"
+      onClick={() => setProfilePanelOpen(true)}
+      className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
+      title="Open contact info"
+    >
+      <Info size={20} />
+    </button>
+  </div>
+</header>
 
       <div ref={chatAreaRef} className="imessage-bg flex-1 overflow-y-auto px-5 py-6">
         <div className="relative z-10 max-w-4xl mx-auto space-y-4">
@@ -1096,6 +1189,7 @@ export default function ChatArea({
                     isSent ? "justify-end" : "justify-start"
                   } group items-center gap-2`}
                 >
+                 
                   {isSelectionMode && (
                     <button
                       type="button"
@@ -1258,7 +1352,165 @@ export default function ChatArea({
           <div ref={messagesEndRef} />
         </div>
       </div>
+{profilePanelOpen && (
+  <aside
+    className="absolute right-0 top-0 bottom-0 z-[9000] bg-white border-l border-slate-200 shadow-[-12px_0_32px_rgba(15,23,42,0.08)] flex flex-col"
+    style={{ width: "clamp(380px, 45%, 620px)" }}
+  >
+    <div className="h-[82px] px-5 flex items-center gap-3 border-b border-slate-200/70">
+      <button
+        type="button"
+        onClick={() => setProfilePanelOpen(false)}
+        className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-700"
+      >
+        <X size={23} />
+      </button>
 
+      <h3 className="text-lg font-black text-slate-950 flex-1">
+        Contact info
+      </h3>
+
+      <button
+        type="button"
+        className="w-10 h-10 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-700"
+      >
+        <Pencil size={20} />
+      </button>
+    </div>
+
+    <div className="flex-1 overflow-y-auto">
+      <div className="px-6 pt-8 pb-7 flex flex-col items-center text-center border-b border-slate-100">
+        <div className="w-28 h-28 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#6366F1] text-white flex items-center justify-center text-4xl font-black shadow-[0_18px_42px_rgba(99,102,241,0.25)]">
+          {initials(getUserName(otherUser))}
+        </div>
+
+        <h2 className="mt-4 text-2xl font-black text-slate-950">
+          {getUserName(otherUser)}
+        </h2>
+
+        <p className="mt-1 text-sm text-slate-500">
+          {otherUser?.email || "No email"}
+        </p>
+
+        {otherUser?.username && (
+          <p className="mt-1 text-sm font-bold text-slate-500">
+            @{otherUser.username}
+          </p>
+        )}
+
+        <div className="mt-5 flex items-center justify-center gap-5">
+          <button
+            type="button"
+            className="flex flex-col items-center gap-2 text-slate-700"
+          >
+            <span className="w-14 h-14 rounded-full bg-slate-100 hover:bg-[#F0EDFF] hover:text-[#6366F1] flex items-center justify-center">
+              <Phone size={22} />
+            </span>
+            <span className="text-sm font-bold">Voice</span>
+          </button>
+
+          <button
+            type="button"
+            className="flex flex-col items-center gap-2 text-slate-700"
+          >
+            <span className="w-14 h-14 rounded-full bg-slate-100 hover:bg-[#F0EDFF] hover:text-[#6366F1] flex items-center justify-center">
+              <Video size={22} />
+            </span>
+            <span className="text-sm font-bold">Video</span>
+          </button>
+
+          <button
+            type="button"
+            className="flex flex-col items-center gap-2 text-slate-700"
+          >
+            <span className="w-14 h-14 rounded-full bg-slate-100 hover:bg-[#F0EDFF] hover:text-[#6366F1] flex items-center justify-center">
+              <Search size={22} />
+            </span>
+            <span className="text-sm font-bold">Search</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="px-6 py-5 border-b border-slate-100">
+        <div className="rounded-[22px] bg-slate-50 border border-slate-200 p-4">
+          <div className="text-xs font-black uppercase tracking-wide text-slate-400 mb-1">
+            Status
+          </div>
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
+              }`}
+            />
+            {isOtherUserOnline ? "Online" : "Offline"}
+          </div>
+        </div>
+      </div>
+
+      <div className="px-6 py-5 border-b border-slate-100">
+        <button
+          type="button"
+          className="w-full flex items-center gap-4 text-left"
+        >
+          <div className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+            <ImageIcon size={22} />
+          </div>
+
+          <div className="flex-1">
+            <div className="font-black text-slate-950">
+              Media, links and docs
+            </div>
+            <div className="text-sm text-slate-500">
+              Shared files will appear here
+            </div>
+          </div>
+
+          <span className="text-sm font-bold text-slate-400">0</span>
+        </button>
+      </div>
+
+      <div className="px-6 py-3">
+  <button
+    type="button"
+    onClick={handleClearCurrentChat}
+    className="w-full py-4 flex items-center gap-5 text-left border-b border-slate-100 text-red-600 hover:bg-red-50 rounded-[14px] px-2"
+  >
+    <MinusCircle size={24} />
+    <span className="font-bold">Clear chat</span>
+  </button>
+
+  {!chat?.isGroupChat && (
+    <button
+      type="button"
+      onClick={handleBlockCurrentChat}
+      className="w-full py-4 flex items-center gap-5 text-left border-b border-slate-100 text-red-600 hover:bg-red-50 rounded-[14px] px-2"
+    >
+      <Ban size={24} />
+      <span className="font-bold">Block</span>
+    </button>
+  )}
+
+  <button
+    type="button"
+    onClick={handleReportPlaceholder}
+    className="w-full py-4 flex items-center gap-5 text-left border-b border-slate-100 text-red-600 hover:bg-red-50 rounded-[14px] px-2"
+  >
+    <Flag size={24} />
+    <span className="font-bold">Report</span>
+  </button>
+
+  <button
+    type="button"
+    onClick={handleDeleteCurrentChat}
+    className="w-full py-4 flex items-center gap-5 text-left text-red-600 hover:bg-red-50 rounded-[14px] px-2"
+  >
+    <Trash2 size={24} />
+    <span className="font-bold">Delete chat</span>
+  </button>
+</div>
+    </div>
+  </aside>
+)}
       {activeMessageMenu && (
         <div
           className="fixed z-[9999]"
@@ -1655,11 +1907,33 @@ export default function ChatArea({
             />
 
             <button
-              type="button"
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full text-slate-400 hover:text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
-            >
-              <Smile size={20} />
-            </button>
+  type="button"
+  onClick={(event) => {
+    event.stopPropagation();
+    setEmojiPickerOpen((prev) => !prev);
+  }}
+  className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full text-slate-400 hover:text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
+>
+  <Smile size={20} />
+</button>
+
+{emojiPickerOpen && (
+  <div
+    className="absolute right-0 bottom-14 z-[9999] w-[280px] rounded-[22px] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.20)] border border-slate-200 p-3 grid grid-cols-8 gap-1"
+    onClick={(event) => event.stopPropagation()}
+  >
+    {emojiOptions.map((emoji) => (
+      <button
+        key={emoji}
+        type="button"
+        onClick={() => handlePickEmoji(emoji)}
+        className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-xl"
+      >
+        {emoji}
+      </button>
+    ))}
+  </div>
+)}
           </div>
 
           {message.trim() ? (
