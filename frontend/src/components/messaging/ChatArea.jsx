@@ -1,5 +1,5 @@
 ﻿import { useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
+import { useSocket } from "../../context/SocketContext.jsx";
 import {
   Phone,
   Video,
@@ -69,6 +69,7 @@ export default function ChatArea({
   onOnlineUsersUpdate,
   onTypingUpdate,
 }) {
+  const { socket: globalSocket } = useSocket();
   const currentUser = getCurrentUser();
   const currentUserId = currentUser?._id || currentUser?.id;
 
@@ -101,28 +102,12 @@ export default function ChatArea({
   const recordingStartedAtRef = useRef(null);
 
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !globalSocket) return;
 
     setIsTyping(false);
+    socketRef.current = globalSocket;
 
-    const socket = io(
-      import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:5002",
-      {
-        transports: ["websocket", "polling"],
-      }
-    );
-
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      socket.emit("addUser", currentUserId);
-    });
-
-    socket.on("getOnlineUsers", (users) => {
-      onOnlineUsersUpdate?.(users);
-    });
-
-    socket.on("receiveMessage", (incomingMessage) => {
+    const handleReceiveMessage = (incomingMessage) => {
       if (chat?._id && incomingMessage.chatId === chat._id) {
         api
           .get(`/messages/${chat._id}`)
@@ -144,36 +129,45 @@ export default function ChatArea({
       });
 
       onMessageSent?.();
-    });
+    };
 
-    socket.on("messageUpdated", (updatedMessage) => {
+    const handleMessageUpdated = (updatedMessage) => {
       setMessages((prev) =>
         prev.map((msg) =>
           msg._id === updatedMessage._id ? updatedMessage : msg
         )
       );
       onMessageSent?.();
-    });
+    };
 
-    socket.on("typing", (data) => {
+    const handleTypingSocket = (data) => {
       if (chat?._id && data.chatId === chat._id) {
         setIsTyping(true);
       }
       onTypingUpdate?.({ chatId: data.chatId, isTyping: true });
-    });
+    };
 
-    socket.on("stopTyping", (data) => {
+    const handleStopTypingSocket = (data) => {
       if (chat?._id && data.chatId === chat._id) {
         setIsTyping(false);
       }
       onTypingUpdate?.({ chatId: data.chatId, isTyping: false });
-    });
+    };
+
+    globalSocket.on("receiveMessage", handleReceiveMessage);
+    globalSocket.on("messageUpdated", handleMessageUpdated);
+    globalSocket.on("typing", handleTypingSocket);
+    globalSocket.on("stopTyping", handleStopTypingSocket);
 
     return () => {
-      socket.disconnect();
+      globalSocket.off("receiveMessage", handleReceiveMessage);
+      globalSocket.off("messageUpdated", handleMessageUpdated);
+      globalSocket.off("typing", handleTypingSocket);
+      globalSocket.off("stopTyping", handleStopTypingSocket);
+
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [currentUserId, chat?._id, onOnlineUsersUpdate, onTypingUpdate]);
+  }, [currentUserId, chat?._id, onMessageSent, onTypingUpdate, globalSocket]);
 
   useEffect(() => {
     const handleClickOutside = () => {
@@ -255,6 +249,23 @@ export default function ChatArea({
 
     return Object.entries(counts);
   };
+
+  useEffect(() => {
+    const handleChatCleared = (event) => {
+      const clearedChatId = event.detail?.chatId;
+
+      if (clearedChatId?.toString() !== chat?._id?.toString()) return;
+
+      setMessages([]);
+      onMessageSent?.();
+    };
+
+    window.addEventListener("safechat:chat-cleared", handleChatCleared);
+
+    return () => {
+      window.removeEventListener("safechat:chat-cleared", handleChatCleared);
+    };
+  }, [chat?._id, onMessageSent]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -764,47 +775,42 @@ export default function ChatArea({
   };
 
   const handleConfirmDeleteMessage = async () => {
-  if (!deleteTarget?._id) return;
+    if (!deleteTarget?._id) return;
 
-  try {
-    const res = await api.patch(`/messages/${deleteTarget._id}/delete`);
-    const deletedMessage = res.data;
+    try {
+      const res = await api.patch(`/messages/${deleteTarget._id}/delete`);
+      const deletedMessage = res.data;
 
-    updateMessageInState(deletedMessage);
+      updateMessageInState(deletedMessage);
+      emitUpdatedMessage(deletedMessage);
+      onMessageSent?.();
 
-    socketRef.current?.emit("messageUpdated", {
-      receiverId: otherUser._id,
-      message: deletedMessage,
-    });
-
-    onMessageSent?.();
-
-    setDeleteTarget(null);
-    setNotice("Message deleted for everyone");
-  } catch (error) {
-    console.error("Failed to delete message for everyone:", error);
-    setNotice(error.response?.data?.message || "Failed to delete for everyone");
-  }
-};
+      setDeleteTarget(null);
+      setNotice("Message deleted for everyone");
+    } catch (error) {
+      console.error("Failed to delete message for everyone:", error);
+      setNotice(error.response?.data?.message || "Failed to delete for everyone");
+    }
+  };
 
   const handleDeleteMessageForMe = async () => {
-  if (!deleteTarget?._id) return;
+    if (!deleteTarget?._id) return;
 
-  try {
-    await api.patch(`/messages/${deleteTarget._id}/delete-for-me`);
+    try {
+      await api.patch(`/messages/${deleteTarget._id}/delete-for-me`);
 
-    setMessages((prev) =>
-      prev.filter((item) => item._id !== deleteTarget._id)
-    );
+      setMessages((prev) =>
+        prev.filter((item) => item._id !== deleteTarget._id)
+      );
 
-    setDeleteTarget(null);
-    setNotice("Message deleted for you");
-    onMessageSent?.();
-  } catch (error) {
-    console.error("Failed to delete message for me:", error);
-    setNotice(error.response?.data?.message || "Failed to delete for me");
-  }
-};
+      setDeleteTarget(null);
+      setNotice("Message deleted for you");
+      onMessageSent?.();
+    } catch (error) {
+      console.error("Failed to delete message for me:", error);
+      setNotice(error.response?.data?.message || "Failed to delete for me");
+    }
+  };
 
   const handleEmojiReaction = async (emoji) => {
     const msg = activeMessageMenu?.message;
@@ -979,16 +985,20 @@ export default function ChatArea({
     );
   }
 
-  const isOtherUserOnline = onlineUsers.includes(otherUser?._id);
+  const isOtherUserOnline =
+    onlineUsers.includes(otherUser?._id) &&
+    otherUser?.privacy?.lastSeen !== "Nobody";
   const displayOtherUser = { ...otherUser, isOnline: isOtherUserOnline };
-const deleteTargetSenderId =
-  typeof deleteTarget?.senderId === "object"
-    ? deleteTarget?.senderId?._id
-    : deleteTarget?.senderId;
 
-const canDeleteTargetForEveryone =
-  deleteTargetSenderId?.toString() === currentUserId?.toString() &&
-  !deleteTarget?.isDeleted;
+  const deleteTargetSenderId =
+    typeof deleteTarget?.senderId === "object"
+      ? deleteTarget?.senderId?._id
+      : deleteTarget?.senderId;
+
+  const canDeleteTargetForEveryone =
+    deleteTargetSenderId?.toString() === currentUserId?.toString() &&
+    !deleteTarget?.isDeleted;
+
   const filteredForwardUsers = forwardUsers.filter((user) => {
     const text = `${getUserName(user)} ${user.email || ""}`.toLowerCase();
     const q = forwardSearch.trim().toLowerCase();
@@ -1365,13 +1375,13 @@ const canDeleteTargetForEveryone =
             </button>
 
             <button
-  type="button"
-  className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-red-50 text-red-600"
-  onClick={handleOpenDeleteModal}
->
-  <Trash2 size={18} />
-  <span>Delete</span>
-</button>
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-red-50 text-red-600"
+              onClick={handleOpenDeleteModal}
+            >
+              <Trash2 size={18} />
+              <span>Delete</span>
+            </button>
           </div>
         </div>
       )}
@@ -1432,32 +1442,32 @@ const canDeleteTargetForEveryone =
             </p>
 
             <div className="flex flex-col gap-2 mt-5">
-  <button
-    type="button"
-    onClick={handleDeleteMessageForMe}
-    className="w-full px-5 py-3 rounded-full bg-slate-100 text-slate-900 font-black hover:bg-slate-200"
-  >
-    Delete for me
-  </button>
+              <button
+                type="button"
+                onClick={handleDeleteMessageForMe}
+                className="w-full px-5 py-3 rounded-full bg-slate-100 text-slate-900 font-black hover:bg-slate-200"
+              >
+                Delete for me
+              </button>
 
-  {canDeleteTargetForEveryone && (
-    <button
-      type="button"
-      onClick={handleConfirmDeleteMessage}
-      className="w-full px-5 py-3 rounded-full bg-red-500 text-white font-black hover:bg-red-600"
-    >
-      Delete for everyone
-    </button>
-  )}
+              {canDeleteTargetForEveryone && (
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteMessage}
+                  className="w-full px-5 py-3 rounded-full bg-red-500 text-white font-black hover:bg-red-600"
+                >
+                  Delete for everyone
+                </button>
+              )}
 
-  <button
-    type="button"
-    onClick={() => setDeleteTarget(null)}
-    className="w-full px-5 py-3 rounded-full font-bold text-slate-500 hover:bg-slate-100"
-  >
-    Cancel
-  </button>
-</div>
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="w-full px-5 py-3 rounded-full font-bold text-slate-500 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
