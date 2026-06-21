@@ -83,7 +83,7 @@ const updateUserProfile = async (req, res) => {
 
 const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).populate("blockedContacts", "name username bio profilePic");
     if (user) {
       res.json({
         _id: user._id,
@@ -161,4 +161,42 @@ const revokeSession = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, getUserProfile, updateUserProfile, deleteUserProfile, getSessions, revokeSession };
+const toggleBlockUser = async (req, res) => {
+  try {
+    const userToBlockId = req.params.userId;
+    if (userToBlockId === req.user._id.toString()) {
+      return res.status(400).json({ message: "You cannot block yourself" });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const isBlocked = user.blockedContacts.some((id) => id.toString() === userToBlockId);
+
+    if (isBlocked) {
+      user.blockedContacts = user.blockedContacts.filter((id) => id.toString() !== userToBlockId);
+    } else {
+      user.blockedContacts.push(userToBlockId);
+    }
+
+    await user.save();
+    const updatedUser = await User.findById(user._id).populate("blockedContacts", "name username bio profilePic");
+
+    res.json({
+      _id: updatedUser._id,
+      name: updatedUser.name,
+      username: updatedUser.username,
+      email: updatedUser.email,
+      bio: updatedUser.bio,
+      profilePic: updatedUser.profilePic,
+      privacy: updatedUser.privacy,
+      blockedContacts: updatedUser.blockedContacts,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getUsers, getUserProfile, updateUserProfile, deleteUserProfile, getSessions, revokeSession, toggleBlockUser };

@@ -491,22 +491,28 @@ useEffect(() => {
 
   const handleToggleBlockChat = () => {
     const chat = chatMenu?.chat;
-    const blocked = chat?.isBlocked;
+    const currentUser = getCurrentUser();
+    const otherUser = getOtherMember(chat);
+
+    const isBlockedByMe = currentUser?.blockedContacts?.some(
+      (contact) => (contact._id || contact).toString() === otherUser?._id?.toString()
+    );
 
     confirmAndRun({
-      title: blocked ? "Unblock chat?" : "Block chat?",
-      body: blocked
-        ? "This will unblock this conversation."
-        : "This will mark this one-to-one conversation as blocked for you.",
-      confirmLabel: blocked ? "Unblock" : "Block",
-      danger: !blocked,
+      title: isBlockedByMe ? "Unblock user?" : "Block user?",
+      body: isBlockedByMe
+        ? "This will unblock this user and allow messages again."
+        : "This will block this user from sending you messages.",
+      confirmLabel: isBlockedByMe ? "Unblock" : "Block",
+      danger: !isBlockedByMe,
       onConfirm: async () => {
-        if (!chat?._id) return;
+        if (!otherUser?._id) return;
 
         try {
-          const res = await api.patch(`/chats/${chat._id}/toggle-block`);
-          updateChatInState(res.data);
-          setNotice(blocked ? "Chat unblocked" : "Chat blocked");
+          const res = await api.post(`/users/toggle-block/${otherUser._id}`);
+          sessionStorage.setItem("user", JSON.stringify(res.data));
+          window.dispatchEvent(new Event("userUpdated"));
+          setNotice(isBlockedByMe ? "User unblocked" : "User blocked");
         } catch (error) {
           console.error("Failed to block chat:", error);
           setNotice(error.response?.data?.message || "Failed to update block");
@@ -777,7 +783,7 @@ const isMoreFilterActive = ["groups", "archived"].includes(activeFilter);
                             {chat.isPinned && <span className="text-xs">📌</span>}
                             {chat.isMuted && <span className="text-xs">🔕</span>}
                             {chat.isFavorite && <span className="text-xs">♡</span>}
-                            {chat.isBlocked && <span className="text-xs">🚫</span>}
+                            {getCurrentUser()?.blockedContacts?.some((c) => (c._id || c).toString() === getOtherMember(chat)?._id?.toString()) && <span className="text-xs">🚫</span>}
                             <span className="text-xs text-slate-400 whitespace-nowrap">
                               {chat.updatedAt
                                 ? new Date(chat.updatedAt).toLocaleTimeString(
@@ -935,16 +941,16 @@ const isMoreFilterActive = ["groups", "archived"].includes(activeFilter);
 
           <div className="h-px bg-slate-200 my-1" />
 
-          {!chatMenu.chat.isGroupChat && (
-            <button
-              type="button"
-              onClick={handleToggleBlockChat}
-              className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
-            >
-              <Ban size={18} />
-              <span>{chatMenu.chat.isBlocked ? "Unblock" : "Block"}</span>
-            </button>
-          )}
+          {!chatMenu.chat?.isGroupChat && (
+              <button
+                type="button"
+                onClick={handleToggleBlockChat}
+                className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-slate-50 text-slate-900"
+              >
+                <Ban size={18} />
+                <span>{getCurrentUser()?.blockedContacts?.some((c) => (c._id || c).toString() === getOtherMember(chatMenu.chat)?._id?.toString()) ? "Unblock" : "Block"}</span>
+              </button>
+            )}
 
           <button
             type="button"

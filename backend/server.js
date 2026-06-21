@@ -76,19 +76,19 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("typing", ({ receiverId, senderName, chatId }) => {
+  socket.on("typing", ({ receiverId, senderId, senderName, chatId }) => {
     const receiverSocketId = onlineUsers.get(receiverId);
 
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("typing", { senderName, chatId });
+      io.to(receiverSocketId).emit("typing", { senderId, senderName, chatId });
     }
   });
 
-  socket.on("stopTyping", ({ receiverId, chatId }) => {
+  socket.on("stopTyping", ({ receiverId, senderId, chatId }) => {
     const receiverSocketId = onlineUsers.get(receiverId);
 
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("stopTyping", { chatId });
+      io.to(receiverSocketId).emit("stopTyping", { senderId, chatId });
     }
   });
 

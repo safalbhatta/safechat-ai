@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSocket } from "../../context/SocketContext.jsx";
 import {
   Phone,
@@ -146,6 +146,11 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     };
 
     const handleTypingSocket = (data) => {
+      const isSenderBlocked = currentUser?.blockedContacts?.some(
+        (contact) => (contact._id || contact).toString() === data.senderId?.toString()
+      );
+      if (isSenderBlocked) return;
+
       if (chat?._id && data.chatId === chat._id) {
         setIsTyping(true);
       }
@@ -153,6 +158,11 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     };
 
     const handleStopTypingSocket = (data) => {
+      const isSenderBlocked = currentUser?.blockedContacts?.some(
+        (contact) => (contact._id || contact).toString() === data.senderId?.toString()
+      );
+      if (isSenderBlocked) return;
+
       if (chat?._id && data.chatId === chat._id) {
         setIsTyping(false);
       }
@@ -172,7 +182,7 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [currentUserId, chat?._id, onMessageSent, onTypingUpdate, globalSocket]);
+  }, [currentUserId, chat?._id, onMessageSent, onTypingUpdate, globalSocket, currentUser]);
 
   useEffect(() => {
   const handleClickOutside = () => {
@@ -321,6 +331,7 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
     socketRef.current.emit("typing", {
       receiverId: otherUser._id,
+      senderId: currentUserId,
       senderName: getUserName(currentUser),
       chatId: chat._id,
     });
@@ -330,6 +341,7 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     typingTimeoutRef.current = setTimeout(() => {
       socketRef.current.emit("stopTyping", {
         receiverId: otherUser._id,
+        senderId: currentUserId,
         chatId: chat._id,
       });
     }, 2000);
@@ -1003,15 +1015,17 @@ const handleClearCurrentChat = async () => {
 };
 
 const handleBlockCurrentChat = async () => {
-  if (!chat?._id) return;
+  if (!otherUser?._id) return;
 
   try {
-    await api.patch(`/chats/${chat._id}/toggle-block`);
-    setNotice("Chat blocked");
+    const res = await api.post(`/users/toggle-block/${otherUser._id}`);
+    sessionStorage.setItem("user", JSON.stringify(res.data));
+    window.dispatchEvent(new Event("userUpdated"));
+    setNotice("Block setting updated");
     onMessageSent?.();
   } catch (error) {
-    console.error("Failed to block chat:", error);
-    setNotice(error.response?.data?.message || "Failed to block chat");
+    console.error("Failed to block/unblock user:", error);
+    setNotice(error.response?.data?.message || "Failed to update block settings");
   }
 };
 
@@ -1055,6 +1069,10 @@ const handleDeleteCurrentChat = async () => {
     onlineUsers.includes(otherUser?._id) &&
     otherUser?.privacy?.lastSeen !== "Nobody";
   const displayOtherUser = { ...otherUser, isOnline: isOtherUserOnline };
+
+  const isBlockedByMe = currentUser?.blockedContacts?.some(
+    (contact) => (contact._id || contact).toString() === otherUser?._id?.toString()
+  );
 
   const deleteTargetSenderId =
     typeof deleteTarget?.senderId === "object"
@@ -1481,12 +1499,11 @@ const handleDeleteCurrentChat = async () => {
 
   {!chat?.isGroupChat && (
     <button
-      type="button"
       onClick={handleBlockCurrentChat}
-      className="w-full py-4 flex items-center gap-5 text-left border-b border-slate-100 text-red-600 hover:bg-red-50 rounded-[14px] px-2"
+      className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-[20px] transition-colors group text-red-600 dark:text-red-500"
     >
-      <Ban size={24} />
-      <span className="font-bold">Block</span>
+      <span className="font-bold">{isBlockedByMe ? "Unblock" : "Block"}</span>
+      <ShieldCheck className="text-red-400 group-hover:text-red-600 dark:group-hover:text-red-500" size={20} />
     </button>
   )}
 
@@ -1863,106 +1880,113 @@ const handleDeleteCurrentChat = async () => {
           isSelectionMode ? "hidden" : ""
         }`}
       >
-        {replyingTo && (
-          <div className="mb-2 mx-12 rounded-[18px] bg-white border border-slate-200 shadow-sm px-4 py-2 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-xs font-black text-[#6366F1]">Replying to</div>
-              <div className="text-sm text-slate-600 truncate">
-                {getMessagePreview(replyingTo)}
+        {isBlockedByMe ? (
+          <div className="flex items-center justify-center p-2 text-slate-500 font-medium">
+            You have blocked this user. Unblock to send a message.
+          </div>
+        ) : (
+          <>
+            {replyingTo && (
+              <div className="mb-2 mx-12 rounded-[18px] bg-white border border-slate-200 shadow-sm px-4 py-2 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-black text-[#6366F1]">Replying to</div>
+                  <div className="text-sm text-slate-600 truncate">
+                    {getMessagePreview(replyingTo)}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setReplyingTo(null)}
+                  className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 font-black"
+                >
+                  ×
+                </button>
               </div>
-            </div>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setReplyingTo(null)}
-              className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 font-black"
-            >
-              ×
-            </button>
-          </div>
-        )}
+            <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+              <button
+                type="button"
+                className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
+              >
+                <Paperclip size={20} />
+              </button>
 
-        <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-          <button
-            type="button"
-            className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
-          >
-            <Paperclip size={20} />
-          </button>
+              <button
+                type="button"
+                className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
+              >
+                <ImageIcon size={20} />
+              </button>
 
-          <button
-            type="button"
-            className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
-          >
-            <ImageIcon size={20} />
-          </button>
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder={`Message ${getUserName(otherUser)}`}
+                  value={message}
+                  onChange={handleTyping}
+                  className="apple-input w-full h-12 rounded-full pl-5 pr-12 text-slate-900 placeholder:text-slate-400"
+                />
 
-          <div className="relative flex-1">
-            <input
-              type="text"
-              placeholder={`Message ${getUserName(otherUser)}`}
-              value={message}
-              onChange={handleTyping}
-              className="apple-input w-full h-12 rounded-full pl-5 pr-12 text-slate-900 placeholder:text-slate-400"
-            />
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setEmojiPickerOpen((prev) => !prev);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full text-slate-400 hover:text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
+                >
+                  <Smile size={20} />
+                </button>
 
-            <button
-  type="button"
-  onClick={(event) => {
-    event.stopPropagation();
-    setEmojiPickerOpen((prev) => !prev);
-  }}
-  className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full text-slate-400 hover:text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
->
-  <Smile size={20} />
-</button>
+                {emojiPickerOpen && (
+                  <div
+                    className="absolute right-0 bottom-14 z-[9999] w-[280px] rounded-[22px] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.20)] border border-slate-200 p-3 grid grid-cols-8 gap-1"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {emojiOptions.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => handlePickEmoji(emoji)}
+                        className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-xl"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-{emojiPickerOpen && (
-  <div
-    className="absolute right-0 bottom-14 z-[9999] w-[280px] rounded-[22px] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.20)] border border-slate-200 p-3 grid grid-cols-8 gap-1"
-    onClick={(event) => event.stopPropagation()}
-  >
-    {emojiOptions.map((emoji) => (
-      <button
-        key={emoji}
-        type="button"
-        onClick={() => handlePickEmoji(emoji)}
-        className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-xl"
-      >
-        {emoji}
-      </button>
-    ))}
-  </div>
-)}
-          </div>
-
-          {message.trim() ? (
-            <button
-              type="submit"
-              className="w-11 h-11 rounded-full apple-primary flex items-center justify-center"
-            >
-              <Send size={19} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
-              className={`h-11 rounded-full flex items-center justify-center transition-all ${
-                isRecording
-                  ? "w-28 bg-red-50 text-red-500 font-black text-xs"
-                  : "w-11 text-[#6366F1] hover:bg-[#F0EDFF]"
-              }`}
-            >
-              {isRecording ? (
-                `Stop ${formatRecordingTime(recordingSeconds)}`
+              {message.trim() ? (
+                <button
+                  type="submit"
+                  className="w-11 h-11 rounded-full apple-primary flex items-center justify-center"
+                >
+                  <Send size={19} />
+                </button>
               ) : (
-                <Mic size={20} />
+                <button
+                  type="button"
+                  onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+                  className={`h-11 rounded-full flex items-center justify-center transition-all ${
+                    isRecording
+                      ? "w-28 bg-red-50 text-red-500 font-black text-xs"
+                      : "w-11 text-[#6366F1] hover:bg-[#F0EDFF]"
+                  }`}
+                >
+                  {isRecording ? (
+                    `Stop ${formatRecordingTime(recordingSeconds)}`
+                  ) : (
+                    <Mic size={19} />
+                  )}
+                </button>
               )}
-            </button>
-          )}
-        </form>
+            </form>
+          </>
+        )}
       </footer>
     </section>
   );
 }
-//change

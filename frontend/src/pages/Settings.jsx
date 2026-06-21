@@ -220,10 +220,7 @@ export default function Settings() {
   };
   const [privacySettings, setPrivacySettings] = useState(defaultPrivacy);
   const [modalConfig, setModalConfig] = useState({ isOpen: false, field: null, title: "", options: [] });
-  const [blockedUsers, setBlockedUsers] = useState([
-    { id: "b-1", name: "Spammer Dave", username: "@spamdave", bio: "Crypto promoter" },
-    { id: "b-2", name: "Telemarketer Bot", username: "@telebot", bio: "Auto sales agent" }
-  ]);
+  const [blockedUsers, setBlockedUsers] = useState([]);
 
   // --- NOTIFICATIONS SETTINGS STATE ---
   const [notificationsSettings, setNotificationsSettings] = useState({
@@ -258,6 +255,9 @@ export default function Settings() {
       
       if (savedUser.privacy) {
         setPrivacySettings({ ...defaultPrivacy, ...savedUser.privacy });
+      }
+      if (savedUser.blockedContacts) {
+        setBlockedUsers(savedUser.blockedContacts);
       }
     };
     
@@ -402,9 +402,16 @@ export default function Settings() {
     setModalConfig({ isOpen: true, field, title, options });
   };
 
-  const handleUnblockUser = (userId, name) => {
-    setBlockedUsers(blockedUsers.filter(u => u.id !== userId));
-    showToast(`Unblocked ${name}`, "success");
+  const handleUnblockUser = async (userId, userName) => {
+    try {
+      const res = await API.post(`/users/toggle-block/${userId}`);
+      sessionStorage.setItem("user", JSON.stringify(res.data));
+      window.dispatchEvent(new Event("userUpdated"));
+      showToast(`Unblocked ${userName}`, "success");
+    } catch (err) {
+      console.error(err);
+      setToast({ show: true, message: "Failed to unblock user", type: "error" });
+    }
   };
 
   // --- NOTIFICATION ACTIONS ---
@@ -739,7 +746,7 @@ export default function Settings() {
                   <div className="space-y-3">
                     {blockedUsers.map((user) => (
                       <div
-                        key={user.id}
+                        key={user._id}
                         className="flex items-center justify-between p-4 bg-white/40 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-800 rounded-2xl transition-all"
                       >
                         <div>
@@ -749,7 +756,7 @@ export default function Settings() {
                         <Button 
                           variant="outline" 
                           size="sm" 
-                          onClick={() => handleUnblockUser(user.id, user.name)}
+                          onClick={() => handleUnblockUser(user._id, user.name)}
                         >
                           Unblock
                         </Button>

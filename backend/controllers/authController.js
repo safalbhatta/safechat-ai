@@ -65,14 +65,17 @@ const registerUser = async (req, res) => {
     user.sessions.push({ token, browser, device, ip });
     await user.save();
 
+    const populatedUser = await User.findById(user._id).populate("blockedContacts", "name username bio profilePic");
+
     res.status(201).json({
-      _id: user._id,
-      name: user.name,
-      username: user.username,
-      email: user.email,
-      bio: user.bio,
-      profilePic: user.profilePic,
-      privacy: user.privacy,
+      _id: populatedUser._id,
+      name: populatedUser.name,
+      username: populatedUser.username,
+      email: populatedUser.email,
+      bio: populatedUser.bio,
+      profilePic: populatedUser.profilePic,
+      privacy: populatedUser.privacy,
+      blockedContacts: populatedUser.blockedContacts,
       token,
     });
   } catch (error) {
@@ -108,6 +111,8 @@ const loginUser = async (req, res) => {
     user.sessions.push({ token, browser, device, ip, lastActive: Date.now() });
     await user.save();
 
+    const populatedUser = await User.findById(user._id).populate("blockedContacts", "name username bio profilePic");
+
     const io = req.app.get("io");
     if (io) {
       io.to(user._id.toString()).emit("sessionCreated", {
@@ -116,13 +121,14 @@ const loginUser = async (req, res) => {
     }
 
     res.json({
-      _id: user._id,
-      name: user.name,
-      username: user.username,
-      email: user.email,
-      bio: user.bio,
-      profilePic: user.profilePic,
-      privacy: user.privacy,
+      _id: populatedUser._id,
+      name: populatedUser.name,
+      username: populatedUser.username,
+      email: populatedUser.email,
+      bio: populatedUser.bio,
+      profilePic: populatedUser.profilePic,
+      privacy: populatedUser.privacy,
+      blockedContacts: populatedUser.blockedContacts,
       token,
     });
   } catch (error) {

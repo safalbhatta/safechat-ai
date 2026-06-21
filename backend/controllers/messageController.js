@@ -1,5 +1,6 @@
 const Message = require("../models/Message");
 const Chat = require("../models/Chat");
+const User = require("../models/User");
 
 const isSameId = (id1, id2) => {
   return id1?.toString() === id2?.toString();
@@ -96,6 +97,17 @@ const sendMessage = async (req, res) => {
       return res.status(400).json({ message: "Receiver is not in this chat" });
     }
 
+    const currentUser = await User.findById(req.user._id);
+    const receiverUser = await User.findById(receiverId);
+
+    if (currentUser?.blockedContacts?.some(id => isSameId(id, receiverId))) {
+      return res.status(403).json({ message: "You have blocked this user" });
+    }
+
+    if (receiverUser?.blockedContacts?.some(id => isSameId(id, req.user._id))) {
+      return res.status(403).json({ message: "You cannot send messages to this user" });
+    }
+
     let replyMessage = null;
 
     if (replyTo) {
@@ -165,6 +177,17 @@ const sendVoiceMessage = async (req, res) => {
 
     if (!receiverInChat) {
       return res.status(400).json({ message: "Receiver is not in this chat" });
+    }
+
+    const currentUser = await User.findById(req.user._id);
+    const receiverUser = await User.findById(receiverId);
+
+    if (currentUser?.blockedContacts?.some(id => isSameId(id, receiverId))) {
+      return res.status(403).json({ message: "You have blocked this user" });
+    }
+
+    if (receiverUser?.blockedContacts?.some(id => isSameId(id, req.user._id))) {
+      return res.status(403).json({ message: "You cannot send messages to this user" });
     }
 
     const audioUrl = `${req.protocol}://${req.get("host")}/uploads/voices/${
