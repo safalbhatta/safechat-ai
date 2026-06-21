@@ -1,6 +1,7 @@
 ﻿import { useNavigate, useLocation } from "react-router-dom";
 import {
   MessageSquare,
+  Archive,
   Users,
   Bell,
   BarChart3,
@@ -11,6 +12,7 @@ import {
 
 const navItems = [
   { icon: MessageSquare, label: "Chats", path: "/app" },
+  { icon: Archive, label: "Archived", path: "/app?filter=archived" },
   { icon: Users, label: "Contacts", path: "/app/contacts" },
   { icon: Bell, label: "Alerts", path: "/app/notifications" },
   { icon: User, label: "Profile", path: "/app/profile" },
@@ -42,9 +44,11 @@ export default function Sidebar() {
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive =
-            item.path === "/app"
-              ? location.pathname === "/app"
-              : location.pathname.startsWith(item.path);
+  item.path === "/app"
+    ? location.pathname === "/app" && location.search !== "?filter=archived"
+    : item.path === "/app?filter=archived"
+    ? location.pathname === "/app" && location.search === "?filter=archived"
+    : location.pathname.startsWith(item.path);
 
           return (
             <button

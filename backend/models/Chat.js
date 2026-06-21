@@ -9,6 +9,28 @@ const chatSchema = new mongoose.Schema(
       },
     ],
 
+    isGroupChat: {
+      type: Boolean,
+      default: false,
+    },
+
+    groupName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    groupAvatar: {
+      type: String,
+      default: "",
+    },
+
+    groupAdmin: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
     lastMessage: {
       type: String,
       default: "",
@@ -29,6 +51,27 @@ const chatSchema = new mongoose.Schema(
     ],
 
     archivedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    favoriteBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    unreadMarkedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    blockedBy: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
