@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Camera,
   MapPin,
@@ -82,8 +82,16 @@ const tabs = [
 ];
 
 export default function Profile() {
-  const currentUser = getLoggedInUser();
+  const [currentUser, setCurrentUser] = useState(getLoggedInUser());
   const [activeTab, setActiveTab] = useState("media");
+
+  useEffect(() => {
+    const handleUserUpdated = () => {
+      setCurrentUser(getLoggedInUser());
+    };
+    window.addEventListener("userUpdated", handleUserUpdated);
+    return () => window.removeEventListener("userUpdated", handleUserUpdated);
+  }, []);
 
   return (
     <div className="h-full overflow-y-auto bg-gradient-to-br from-white/70 via-slate-50/80 to-indigo-50/60">

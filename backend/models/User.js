@@ -44,7 +44,16 @@ const userSchema = new mongoose.Schema(
       status: { type: String, enum: ['Everyone', 'My contacts', 'Selected contacts', 'Nobody'], default: 'My contacts' },
       calls: { type: String, enum: ['Everyone', 'Silence unknown callers'], default: 'Silence unknown callers' }
     },
-    blockedContacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+    blockedContacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    sessions: [
+      {
+        token: { type: String, required: true },
+        device: { type: String, default: "Unknown Device" },
+        browser: { type: String, default: "Unknown Browser" },
+        ip: { type: String, default: "Unknown IP" },
+        lastActive: { type: Date, default: Date.now }
+      }
+    ]
   },
   { timestamps: true }
 );

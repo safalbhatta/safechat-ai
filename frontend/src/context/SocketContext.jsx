@@ -32,6 +32,14 @@ export function SocketProvider({ children }) {
       setOnlineUsers(users);
     });
 
+    newSocket.on("sessionRevoked", (revokedToken) => {
+      const currentToken = sessionStorage.getItem("token");
+      if (currentToken === revokedToken) {
+        sessionStorage.clear();
+        window.location.href = "/login";
+      }
+    });
+
     setSocket(newSocket);
 
     return () => {

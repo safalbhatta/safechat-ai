@@ -24,6 +24,13 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ message: "User not found" });
     }
 
+    const sessionExists = req.user.sessions.some(s => s.token === token);
+    if (!sessionExists) {
+      return res.status(401).json({ message: "Session expired or revoked" });
+    }
+
+    req.token = token;
+
     next();
   } catch (error) {
     res.status(401).json({ message: "Not authorized, token failed" });

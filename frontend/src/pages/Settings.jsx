@@ -21,6 +21,7 @@ import {
   Laptop
 } from "lucide-react";
 import API from "../lib/api";
+import { useSocket } from "../context/SocketContext";
 
 const settingsSections = [
   { id: "account", label: "Account", icon: User },
@@ -183,7 +184,9 @@ function Toast({ message, type, onClose }) {
 }
 
 export default function Settings() {
+  const { socket } = useSocket();
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState("account");
   const [activeSection, setActiveSection] = useState("account");
   const [showSidebar, setShowSidebar] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
@@ -203,11 +206,7 @@ export default function Settings() {
   const [securityForm, setSecurityForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
   const [enable2FA, setEnable2FA] = useState(false);
-  const [activeSessions, setActiveSessions] = useState([
-    { id: "sess-1", device: "MacBook Pro - San Francisco, CA", lastActive: "Active Now", current: true, browser: "Chrome", ip: "192.168.1.45" },
-    { id: "sess-2", device: "iPhone 15 - San Francisco, CA", lastActive: "2 hours ago", current: false, browser: "Safari", ip: "172.56.21.108" },
-    { id: "sess-3", device: "iPad Air - Oakland, CA", lastActive: "1 day ago", current: false, browser: "Safari Mobile", ip: "172.56.21.109" }
-  ]);
+  const [activeSessions, setActiveSessions] = useState([]);
 
   // --- PRIVACY SETTINGS STATE ---
   const defaultPrivacy = {
@@ -248,25 +247,50 @@ export default function Settings() {
 
   // Load user data on mount
   useEffect(() => {
-    const savedUser = JSON.parse(sessionStorage.getItem("user") || "{}");
-    setAccountForm({
-      name: savedUser.name || "",
-      username: savedUser.username || "",
-      email: savedUser.email || "",
-      bio: savedUser.bio || ""
-    });
-    if (savedUser.privacy) {
-      setPrivacySettings({ ...defaultPrivacy, ...savedUser.privacy });
-    }
+    const loadUser = () => {
+      const savedUser = JSON.parse(sessionStorage.getItem("user") || "{}");
+      setAccountForm({
+        name: savedUser.name || "",
+        username: savedUser.username || "",
+        email: savedUser.email || "",
+        bio: savedUser.bio || ""
+      });
+      
+      if (savedUser.privacy) {
+        setPrivacySettings({ ...defaultPrivacy, ...savedUser.privacy });
+      }
+    };
+    
+    loadUser();
 
-    // Apply stored theme on load
+    window.addEventListener("userUpdated", loadUser);
+    return () => window.removeEventListener("userUpdated", loadUser);
+  }, []);
+
+  // Apply stored theme on load
+  useEffect(() => {    
     const storedTheme = localStorage.getItem("theme") || "light";
     if (storedTheme === "dark") {
       document.documentElement.classList.add("dark");
     } else {
       document.documentElement.classList.remove("dark");
     }
-  }, []);
+
+    const fetchSessions = () => {
+      API.get("/users/sessions")
+        .then(res => setActiveSessions(res.data))
+        .catch(err => console.error("Failed to load sessions", err));
+    };
+    
+    fetchSessions();
+
+    if (socket) {
+      socket.on("sessionCreated", fetchSessions);
+      return () => {
+        socket.off("sessionCreated", fetchSessions);
+      };
+    }
+  }, [socket]);
 
   // Update account profile
   const handleAccountChange = (e) => {
@@ -289,6 +313,7 @@ export default function Settings() {
     try {
       const res = await API.put("/users/profile", accountForm); 
       sessionStorage.setItem("user", JSON.stringify(res.data));
+      window.dispatchEvent(new Event("userUpdated"));
       showToast("Profile details updated successfully!", "success");
     } catch (err) {
       console.error(err);
@@ -346,9 +371,15 @@ export default function Settings() {
     }
   };
 
-  const handleRevokeSession = (sessionId) => {
-    setActiveSessions(activeSessions.filter(s => s.id !== sessionId));
-    showToast("Session terminated successfully", "success");
+  const handleRevokeSession = async (sessionId) => {
+    try {
+      await API.delete(`/users/sessions/${sessionId}`);
+      setActiveSessions(activeSessions.filter(s => s.id !== sessionId));
+      showToast("Session terminated successfully", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Failed to revoke session.", "error");
+    }
   };
 
   // --- PRIVACY ACTIONS ---
@@ -359,6 +390,7 @@ export default function Settings() {
     try {
       const res = await API.put("/users/profile", { privacy: { [field]: value } });
       sessionStorage.setItem("user", JSON.stringify(res.data));
+      window.dispatchEvent(new Event("userUpdated"));
       showToast(`${field.replace(/([A-Z])/g, ' $1')} updated to ${value}`, "success");
     } catch (err) {
       console.error("Failed to update privacy setting", err);
@@ -817,7 +849,7 @@ export default function Settings() {
                             Browser: {session.browser} • IP: {session.ip}
                           </p>
                           <p className="text-xs text-[#64748b] dark:text-slate-400 mt-0.5">
-                            Last Active: {session.lastActive}
+                            Last Active: {new Date(session.lastActive).toLocaleString()}
                           </p>
                         </div>
                       </div>

@@ -56,6 +56,19 @@ export default function Layout() {
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    const fetchUser = async () => {
+      try {
+        const res = await api.get("/users/profile");
+        sessionStorage.setItem("user", JSON.stringify(res.data));
+        // Force an event so other components know sessionStorage updated
+        window.dispatchEvent(new Event("userUpdated"));
+      } catch (err) {
+        console.error("Failed to sync profile:", err);
+      }
+    };
+    fetchUser();
+
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 

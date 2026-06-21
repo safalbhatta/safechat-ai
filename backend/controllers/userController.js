@@ -15,10 +15,12 @@ const getUsers = async (req, res) => {
 
 const updateUserProfile = async (req, res) => {
   try {
+    console.log("updateUserProfile called by user:", req.user._id, "with body:", req.body);
     const { name, username, bio, privacy, currentPassword, newPassword } = req.body;
     const user = await User.findById(req.user._id);
 
     if (user) {
+      console.log("Current user before update:", user.name, user.username, user.bio);
       if (username && username !== user.username) {
         const usernameExists = await User.findOne({ username });
         if (usernameExists) {
@@ -47,7 +49,9 @@ const updateUserProfile = async (req, res) => {
         user.markModified("privacy");
       }
 
+      console.log("User object before save:", user.name, user.username, user.bio);
       const updatedUser = await user.save();
+      console.log("User object after save:", updatedUser.name, updatedUser.username, updatedUser.bio);
 
       const payload = {
         _id: updatedUser._id,
@@ -77,6 +81,28 @@ const updateUserProfile = async (req, res) => {
   }
 };
 
+const getUserProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (user) {
+      res.json({
+        _id: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        bio: user.bio,
+        profilePic: user.profilePic,
+        privacy: user.privacy,
+        blockedContacts: user.blockedContacts,
+      });
+    } else {
+      res.status(404).json({ message: "User not found" });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 const deleteUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -91,4 +117,48 @@ const deleteUserProfile = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, updateUserProfile, deleteUserProfile };
+const getSessions = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const activeSessions = user.sessions.map((session) => ({
+      id: session._id,
+      device: session.device,
+      browser: session.browser,
+      ip: session.ip,
+      lastActive: session.lastActive,
+      current: session.token === req.token,
+    }));
+
+    res.json(activeSessions);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const revokeSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const user = await User.findById(req.user._id);
+    
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const sessionToRevoke = user.sessions.find(s => s._id.toString() === sessionId);
+    if (sessionToRevoke) {
+      const io = req.app.get("io");
+      if (io) {
+        io.to(user._id.toString()).emit("sessionRevoked", sessionToRevoke.token);
+      }
+    }
+
+    user.sessions = user.sessions.filter(s => s._id.toString() !== sessionId);
+    await user.save();
+    
+    res.json({ message: "Session revoked successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getUsers, getUserProfile, updateUserProfile, deleteUserProfile, getSessions, revokeSession };

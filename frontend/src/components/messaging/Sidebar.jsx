@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   MessageSquare,
@@ -23,6 +24,15 @@ const navItems = [
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [user, setUser] = useState(JSON.parse(sessionStorage.getItem("user") || "{}"));
+  
+  useEffect(() => {
+    const handleUserUpdated = () => {
+      setUser(JSON.parse(sessionStorage.getItem("user") || "{}"));
+    };
+    window.addEventListener("userUpdated", handleUserUpdated);
+    return () => window.removeEventListener("userUpdated", handleUserUpdated);
+  }, []);
 
   const handleLogout = () => {
     sessionStorage.removeItem("token");

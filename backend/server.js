@@ -46,6 +46,7 @@ io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
   socket.on("addUser", (userId) => {
+    socket.join(userId);
     onlineUsers.set(userId, socket.id);
     io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
     console.log("Online users:", onlineUsers);
