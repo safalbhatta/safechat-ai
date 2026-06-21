@@ -1,4 +1,4 @@
-﻿import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Welcome from "./pages/Welcome.jsx";
 import Login from "./pages/auth/Login.jsx";
 import Register from "./pages/auth/Register.jsx";
@@ -10,6 +10,7 @@ import Profile from "./pages/Profile.jsx";
 import Settings from "./pages/Settings.jsx";
 import Notifications from "./pages/Notifications.jsx";
 import Analytics from "./pages/Analytics.jsx";
+import { SocketProvider } from "./context/SocketContext.jsx";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -34,7 +35,9 @@ export default function App() {
           path="/app"
           element={
             <ProtectedRoute>
-              <Layout />
+              <SocketProvider>
+                <Layout />
+              </SocketProvider>
             </ProtectedRoute>
           }
         >

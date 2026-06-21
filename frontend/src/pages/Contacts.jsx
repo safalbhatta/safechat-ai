@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Search,
   UserPlus,
@@ -12,6 +12,7 @@ import {
   Filter,
 } from "lucide-react";
 import api from "../lib/api.js";
+import { useSocket } from "../context/SocketContext.jsx";
 
 function getUserName(user) {
   return user?.username || user?.name || user?.email || "Unknown User";
@@ -31,6 +32,7 @@ export default function Contacts() {
   const [search, setSearch] = useState("");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { socket: globalSocket, onlineUsers } = useSocket();
 
   useEffect(() => {
     const loadUsers = async () => {
@@ -45,7 +47,14 @@ export default function Contacts() {
     };
 
     loadUsers();
-  }, []);
+    
+    if (globalSocket) {
+      globalSocket.on("userProfileUpdated", loadUsers);
+      return () => {
+        globalSocket.off("userProfileUpdated", loadUsers);
+      };
+    }
+  }, [globalSocket]);
 
   const filteredUsers = users.filter((user) =>
     getUserName(user).toLowerCase().includes(search.toLowerCase())
@@ -112,7 +121,11 @@ export default function Contacts() {
               No contacts found.
             </div>
           ) : (
-            filteredUsers.map((user, index) => (
+            filteredUsers.map((rawUser, index) => {
+              const isOnline = onlineUsers.includes(rawUser._id) && rawUser?.privacy?.lastSeen !== "Nobody";
+              const user = { ...rawUser, isOnline };
+              
+              return (
               <div
                 key={user._id}
                 className="page-card page-card-hover rounded-[30px] p-5"
@@ -181,7 +194,8 @@ export default function Contacts() {
                   ))}
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </section>
       </div>

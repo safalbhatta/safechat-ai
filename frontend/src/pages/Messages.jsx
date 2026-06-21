@@ -1,14 +1,15 @@
-﻿import { useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { ArrowLeft } from "lucide-react";
 import ConversationList from "../components/messaging/ConversationList.jsx";
 import ChatArea from "../components/messaging/ChatArea.jsx";
+import { useSocket } from "../context/SocketContext.jsx";
 
 export default function Messages() {
   const [selectedChat, setSelectedChat] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [showConversationList, setShowConversationList] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
-  const [onlineUsers, setOnlineUsers] = useState([]);
+  const { onlineUsers } = useSocket();
   const [typingChats, setTypingChats] = useState({});
 
   const handleSelectChat = (chat, user) => {
@@ -59,7 +60,6 @@ export default function Messages() {
           otherUser={selectedUser}
           onMessageSent={refreshChats}
           onlineUsers={onlineUsers}
-          onOnlineUsersUpdate={setOnlineUsers}
           onTypingUpdate={handleTypingUpdate}
         />
       </div>
