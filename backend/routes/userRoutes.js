@@ -12,7 +12,8 @@ const {
   getSessions, 
   revokeSession, 
   toggleBlockUser,
-  removeFriend
+  removeFriend,
+  getSuggestions
 } = require("../controllers/userController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -20,6 +21,7 @@ const router = express.Router();
 
 router.get("/", protect, getUsers);
 router.get("/search", protect, searchUsers);
+router.get("/suggestions", protect, getSuggestions);
 router.get("/requests", protect, getFriendRequests);
 router.post("/request", protect, sendFriendRequest);
 router.post("/request/accept", protect, acceptFriendRequest);

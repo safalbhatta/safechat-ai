@@ -171,6 +171,28 @@ const removeFriend = async (req, res) => {
   }
 };
 
+const getSuggestions = async (req, res) => {
+  try {
+    const currentUser = await User.findById(req.user._id);
+    
+    // Exclude the current user, existing friends, and anyone with an active request
+    const excludedIds = [
+      req.user._id,
+      ...currentUser.friends,
+      ...currentUser.sentRequests,
+      ...currentUser.friendRequests
+    ];
+
+    const suggestions = await User.find({ _id: { $nin: excludedIds } })
+      .limit(10)
+      .select("-password");
+
+    res.json(suggestions);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 const updateUserProfile = async (req, res) => {
   try {
     console.log("updateUserProfile called by user:", req.user._id, "with body:", req.body);
@@ -370,5 +392,6 @@ module.exports = {
   getSessions, 
   revokeSession, 
   toggleBlockUser,
-  removeFriend
+  removeFriend,
+  getSuggestions
 };
