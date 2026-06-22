@@ -8,7 +8,8 @@ import {
   X,
   Loader2,
   Sparkles,
-  Globe
+  Globe,
+  Bell
 } from "lucide-react";
 import api from "../lib/api.js";
 import { useSocket } from "../context/SocketContext.jsx";
@@ -31,6 +32,7 @@ export default function Contacts() {
   const [search, setSearch] = useState("");
   const [users, setUsers] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
+  const [friendRequests, setFriendRequests] = useState({ incoming: [], outgoing: [] });
   const [loading, setLoading] = useState(true);
   const { socket: globalSocket, onlineUsers } = useSocket();
   const navigate = useNavigate();
@@ -47,12 +49,14 @@ export default function Contacts() {
 
   const loadData = async () => {
     try {
-      const [usersRes, suggRes] = await Promise.all([
+      const [usersRes, suggRes, reqsRes] = await Promise.all([
         api.get("/users"),
-        api.get("/users/suggestions").catch(() => ({ data: [] }))
+        api.get("/users/suggestions").catch(() => ({ data: [] })),
+        api.get("/users/requests").catch(() => ({ data: { incoming: [], outgoing: [] } }))
       ]);
       setUsers(usersRes.data || []);
       setSuggestions(suggRes.data || []);
+      setFriendRequests(reqsRes.data || { incoming: [], outgoing: [] });
     } catch (error) {
       console.error("Failed to load users:", error);
     } finally {
@@ -76,7 +80,7 @@ export default function Contacts() {
   }, [globalSocket]);
 
   useEffect(() => {
-    if (modalSearch.trim().length >= 2) {
+    if (modalSearch.trim().length >= 1) {
       setIsSearching(true);
       const timer = setTimeout(() => {
         api.get(`/users/search?query=${modalSearch}`)
@@ -105,6 +109,26 @@ export default function Contacts() {
       setModalSearch("");
     } catch (error) {
       showNotice(error.response?.data?.message || "Failed to send request");
+    }
+  };
+
+  const handleAcceptRequest = async (userId) => {
+    try {
+      await api.post(`/users/request/accept`, { requesterId: userId });
+      showNotice("Friend request accepted!");
+      loadData();
+    } catch (error) {
+      showNotice(error.response?.data?.message || "Failed to accept request");
+    }
+  };
+
+  const handleDeclineRequest = async (userId) => {
+    try {
+      await api.post(`/users/request/decline`, { requesterId: userId });
+      showNotice("Friend request declined!");
+      loadData();
+    } catch (error) {
+      showNotice(error.response?.data?.message || "Failed to decline request");
     }
   };
 
@@ -159,6 +183,29 @@ export default function Contacts() {
             <UserPlus size={18} /> Add Friend
           </button>
         )}
+
+        {type === "incoming" && (
+          <div className="flex items-center gap-2 mt-auto">
+            <button 
+              onClick={() => handleAcceptRequest(user._id)}
+              className="flex-1 h-11 rounded-xl bg-emerald-50 text-emerald-600 font-bold hover:bg-emerald-100 flex items-center justify-center transition-colors"
+            >
+              Accept
+            </button>
+            <button 
+              onClick={() => handleDeclineRequest(user._id)}
+              className="flex-1 h-11 rounded-xl bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 flex items-center justify-center transition-colors"
+            >
+              Decline
+            </button>
+          </div>
+        )}
+
+        {type === "outgoing" && (
+          <div className="w-full h-11 rounded-xl bg-slate-50 text-slate-400 font-bold flex items-center justify-center gap-2 cursor-not-allowed">
+            Request Pending
+          </div>
+        )}
       </div>
     );
   };
@@ -211,6 +258,18 @@ export default function Contacts() {
               <Sparkles size={20} className={activeTab === "suggestions" ? "text-amber-500" : "text-slate-400"} />
               Suggestions
             </button>
+            <button
+              onClick={() => setActiveTab("requests")}
+              className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl font-bold transition-all whitespace-nowrap ${
+                activeTab === "requests" 
+                  ? "bg-white text-rose-600 shadow-[0_4px_20px_rgba(0,0,0,0.05)] border border-slate-100" 
+                  : "text-slate-600 hover:bg-slate-100/80"
+              }`}
+            >
+              <Bell size={20} className={activeTab === "requests" ? "text-rose-500" : "text-slate-400"} />
+              Friend Requests
+              {friendRequests.incoming.length > 0 && <span className="ml-auto text-xs font-black bg-rose-100 text-rose-600 py-1 px-2.5 rounded-full">{friendRequests.incoming.length}</span>}
+            </button>
           </nav>
         </div>
 
@@ -233,6 +292,7 @@ export default function Contacts() {
               {activeTab === "friends" && "Your Friends"}
               {activeTab === "online" && "Online Friends"}
               {activeTab === "suggestions" && "Suggested For You"}
+              {activeTab === "requests" && "Friend Requests"}
             </h2>
 
             {/* Mobile Add Friend Button */}
@@ -302,6 +362,36 @@ export default function Contacts() {
                     {suggestions.map(u => renderUserCard(u, "suggestion"))}
                   </div>
                 )
+              )}
+
+              {activeTab === "requests" && (
+                <div className="space-y-10">
+                  {friendRequests.incoming.length > 0 ? (
+                    <div>
+                      <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
+                        <Bell className="text-rose-500" size={20} /> Incoming Requests
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                        {friendRequests.incoming.map(u => renderUserCard(u, "incoming"))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-10 text-center flex flex-col items-center">
+                      <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400"><Bell size={24}/></div>
+                      <h3 className="text-lg font-black text-slate-800 mb-1">No incoming requests</h3>
+                      <p className="text-slate-500 font-bold text-sm">You're all caught up!</p>
+                    </div>
+                  )}
+
+                  {friendRequests.outgoing.length > 0 && (
+                    <div className="pt-8 border-t border-slate-200/60">
+                      <h3 className="text-lg font-black text-slate-800 mb-4 text-slate-400">Outgoing Requests</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 opacity-80">
+                        {friendRequests.outgoing.map(u => renderUserCard(u, "outgoing"))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </>
           )}
