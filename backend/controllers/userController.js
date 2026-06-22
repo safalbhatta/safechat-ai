@@ -3,11 +3,169 @@ const bcrypt = require("bcryptjs");
 
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({ _id: { $ne: req.user._id } }).select(
+    const user = await User.findById(req.user._id).populate(
+      "friends",
       "-password"
     );
 
+    res.json(user.friends || []);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) return res.json([]);
+
+    const users = await User.find({
+      $and: [
+        { _id: { $ne: req.user._id } },
+        {
+          $or: [
+            { username: { $regex: query, $options: "i" } },
+            { name: { $regex: query, $options: "i" } },
+            { email: { $regex: query, $options: "i" } }
+          ]
+        }
+      ]
+    }).select("-password");
+
     res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const sendFriendRequest = async (req, res) => {
+  try {
+    const { targetUserId } = req.body;
+    if (targetUserId === req.user._id.toString()) {
+      return res.status(400).json({ message: "Cannot send request to yourself" });
+    }
+
+    const currentUser = await User.findById(req.user._id);
+    const targetUser = await User.findById(targetUserId);
+
+    if (!targetUser) return res.status(404).json({ message: "User not found" });
+
+    if (currentUser.friends.includes(targetUserId)) {
+      return res.status(400).json({ message: "Already friends" });
+    }
+    if (currentUser.sentRequests.includes(targetUserId)) {
+      return res.status(400).json({ message: "Request already sent" });
+    }
+
+    currentUser.sentRequests.push(targetUserId);
+    targetUser.friendRequests.push(currentUser._id);
+
+    await currentUser.save();
+    await targetUser.save();
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(targetUser._id.toString()).emit("friendRequestReceived", {
+        from: { _id: currentUser._id, username: currentUser.username, name: currentUser.name }
+      });
+    }
+
+    res.json({ message: "Friend request sent" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const acceptFriendRequest = async (req, res) => {
+  try {
+    const { requesterId } = req.body;
+    const currentUser = await User.findById(req.user._id);
+    const requesterUser = await User.findById(requesterId);
+
+    if (!requesterUser) return res.status(404).json({ message: "Requester not found" });
+
+    if (!currentUser.friendRequests.includes(requesterId)) {
+      return res.status(400).json({ message: "No pending request from this user" });
+    }
+
+    // Add to friends
+    if (!currentUser.friends.includes(requesterId)) currentUser.friends.push(requesterId);
+    if (!requesterUser.friends.includes(currentUser._id)) requesterUser.friends.push(currentUser._id);
+
+    // Remove requests
+    currentUser.friendRequests = currentUser.friendRequests.filter(id => id.toString() !== requesterId);
+    requesterUser.sentRequests = requesterUser.sentRequests.filter(id => id.toString() !== currentUser._id.toString());
+
+    await currentUser.save();
+    await requesterUser.save();
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(requesterUser._id.toString()).emit("friendRequestAccepted", {
+        from: { _id: currentUser._id, username: currentUser.username, name: currentUser.name }
+      });
+    }
+
+    res.json({ message: "Friend request accepted" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const declineFriendRequest = async (req, res) => {
+  try {
+    const { requesterId } = req.body;
+    const currentUser = await User.findById(req.user._id);
+    const requesterUser = await User.findById(requesterId);
+
+    if (currentUser.friendRequests.includes(requesterId)) {
+      currentUser.friendRequests = currentUser.friendRequests.filter(id => id.toString() !== requesterId);
+      await currentUser.save();
+    }
+
+    if (requesterUser && requesterUser.sentRequests.includes(currentUser._id)) {
+      requesterUser.sentRequests = requesterUser.sentRequests.filter(id => id.toString() !== currentUser._id.toString());
+      await requesterUser.save();
+    }
+
+    res.json({ message: "Friend request declined" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const getFriendRequests = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .populate("friendRequests", "name username profilePic")
+      .populate("sentRequests", "name username profilePic");
+
+    res.json({
+      incoming: user.friendRequests,
+      outgoing: user.sentRequests
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const removeFriend = async (req, res) => {
+  try {
+    const { friendId } = req.body;
+    const currentUser = await User.findById(req.user._id);
+    const friendUser = await User.findById(friendId);
+
+    if (currentUser && currentUser.friends.includes(friendId)) {
+      currentUser.friends = currentUser.friends.filter(id => id.toString() !== friendId);
+      await currentUser.save();
+    }
+
+    if (friendUser && friendUser.friends.includes(currentUser._id)) {
+      friendUser.friends = friendUser.friends.filter(id => id.toString() !== currentUser._id.toString());
+      await friendUser.save();
+    }
+
+    res.json({ message: "Friend removed" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -199,4 +357,18 @@ const toggleBlockUser = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, getUserProfile, updateUserProfile, deleteUserProfile, getSessions, revokeSession, toggleBlockUser };
+module.exports = { 
+  getUsers, 
+  searchUsers,
+  sendFriendRequest,
+  acceptFriendRequest,
+  declineFriendRequest,
+  getFriendRequests,
+  getUserProfile, 
+  updateUserProfile, 
+  deleteUserProfile, 
+  getSessions, 
+  revokeSession, 
+  toggleBlockUser,
+  removeFriend
+};

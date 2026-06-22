@@ -24,8 +24,10 @@ import {
   Pencil,
   X,
   Download,
-   Ban,
+  Ban,
   MinusCircle,
+  ShieldCheck,
+  UserMinus,
 } from "lucide-react";
 import api from "../../lib/api.js";
 
@@ -1077,6 +1079,22 @@ const handleDeleteCurrentChat = async () => {
     setNotice(error.response?.data?.message || "Failed to delete chat");
   }
 };
+
+const handleUnfriendUser = async () => {
+  if (!otherUser?._id) return;
+
+  try {
+    const res = await api.post(`/users/remove-friend`, { friendId: otherUser._id });
+    setNotice("User removed from friends");
+    setProfilePanelOpen(false);
+    // Reload UI state via custom event or socket
+    window.dispatchEvent(new Event("userUpdated"));
+  } catch (error) {
+    console.error("Failed to unfriend user:", error);
+    setNotice(error.response?.data?.message || "Failed to unfriend user");
+  }
+};
+
   if (!chat || !otherUser) {
     return (
       <section className="h-full flex items-center justify-center imessage-bg">
@@ -1531,13 +1549,23 @@ const handleDeleteCurrentChat = async () => {
   </button>
 
   {!chat?.isGroupChat && (
-    <button
-      onClick={handleBlockCurrentChat}
-      className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-[20px] transition-colors group text-red-600 dark:text-red-500"
-    >
-      <span className="font-bold">{isBlockedByMe ? "Unblock" : "Block"}</span>
-      <ShieldCheck className="text-red-400 group-hover:text-red-600 dark:group-hover:text-red-500" size={20} />
-    </button>
+    <>
+      <button
+        onClick={handleBlockCurrentChat}
+        className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-[20px] transition-colors group text-red-600 dark:text-red-500"
+      >
+        <span className="font-bold">{isBlockedByMe ? "Unblock" : "Block"}</span>
+        <ShieldCheck className="text-red-400 group-hover:text-red-600 dark:group-hover:text-red-500" size={20} />
+      </button>
+
+      <button
+        onClick={handleUnfriendUser}
+        className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-[20px] transition-colors group text-red-600 dark:text-red-500"
+      >
+        <span className="font-bold">Unfriend</span>
+        <UserMinus className="text-red-400 group-hover:text-red-600 dark:group-hover:text-red-500" size={20} />
+      </button>
+    </>
   )}
 
   <button

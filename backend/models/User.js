@@ -45,6 +45,9 @@ const userSchema = new mongoose.Schema(
       calls: { type: String, enum: ['Everyone', 'Silence unknown callers'], default: 'Silence unknown callers' }
     },
     blockedContacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    friendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    sentRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     sessions: [
       {
         token: { type: String, required: true },

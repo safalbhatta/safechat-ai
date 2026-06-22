@@ -16,7 +16,7 @@ import {
   MinusCircle,
   LogOut,
   X,
-  Check,
+  UserPlus,
   MoreHorizontal,
 } from "lucide-react";
 import api from "../../lib/api.js";
@@ -85,6 +85,11 @@ export default function ConversationList({
   const [groupMemberIds, setGroupMemberIds] = useState([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [moreFilterOpen, setMoreFilterOpen] = useState(false);
+  
+  const [globalSearchResults, setGlobalSearchResults] = useState([]);
+  const [isSearchingGlobal, setIsSearchingGlobal] = useState(false);
+  const [friendRequests, setFriendRequests] = useState({ incoming: [], outgoing: [] });
+  const [showRequestsModal, setShowRequestsModal] = useState(false);
 
   const selectedChatIdRef = useRef(selectedChatId);
 
@@ -148,14 +153,16 @@ export default function ConversationList({
 
   const loadData = useCallback(async () => {
     try {
-      const [usersRes, chatsRes] = await Promise.all([
+      const [usersRes, chatsRes, reqsRes] = await Promise.all([
         api.get("/users"),
         api.get("/chats"),
+        api.get("/users/requests").catch(() => ({ data: { incoming: [], outgoing: [] } }))
       ]);
 
       const fetchedChats = chatsRes.data || [];
 
       setUsers(usersRes.data || []);
+      setFriendRequests(reqsRes.data || { incoming: [], outgoing: [] });
       setChats(
         fetchedChats.map((chat) =>
           chat._id === selectedChatIdRef.current
@@ -177,11 +184,31 @@ export default function ConversationList({
     if (!globalSocket) return;
 
     globalSocket.on("userProfileUpdated", loadData);
+    globalSocket.on("friendRequestReceived", loadData);
+    globalSocket.on("friendRequestAccepted", loadData);
 
     return () => {
       globalSocket.off("userProfileUpdated", loadData);
+      globalSocket.off("friendRequestReceived", loadData);
+      globalSocket.off("friendRequestAccepted", loadData);
     };
   }, [loadData, reloadKey, globalSocket]);
+
+  useEffect(() => {
+    if (searchQuery.trim().length >= 2) {
+      setIsSearchingGlobal(true);
+      const timer = setTimeout(() => {
+        api.get(`/users/search?query=${searchQuery}`)
+          .then(res => setGlobalSearchResults(res.data || []))
+          .catch(err => console.error("Global search failed:", err))
+          .finally(() => setIsSearchingGlobal(false));
+      }, 500);
+      return () => clearTimeout(timer);
+    } else {
+      setGlobalSearchResults([]);
+      setIsSearchingGlobal(false);
+    }
+  }, [searchQuery]);
 
   useEffect(() => {
   const closeMenu = () => {
@@ -360,6 +387,36 @@ useEffect(() => {
 
     const target = getChatTarget(chat);
     onSelectChat(chat, target);
+  };
+
+  const handleSendRequest = async (userId) => {
+    try {
+      await api.post(`/users/request`, { targetUserId: userId });
+      setNotice("Friend request sent");
+      loadData();
+    } catch (error) {
+      setNotice(error.response?.data?.message || "Failed to send request");
+    }
+  };
+
+  const handleAcceptRequest = async (userId) => {
+    try {
+      await api.post(`/users/request/accept`, { requesterId: userId });
+      setNotice("Friend request accepted");
+      loadData();
+    } catch (error) {
+      setNotice(error.response?.data?.message || "Failed to accept request");
+    }
+  };
+
+  const handleDeclineRequest = async (userId) => {
+    try {
+      await api.post(`/users/request/decline`, { requesterId: userId });
+      setNotice("Friend request declined");
+      loadData();
+    } catch (error) {
+      setNotice(error.response?.data?.message || "Failed to decline request");
+    }
   };
 
   const openChatMenu = (event, chat) => {
@@ -643,13 +700,27 @@ const isMoreFilterActive = ["groups", "archived"].includes(activeFilter);
             </p>
           </div>
 
-          <button
-            onClick={() => setShowGroupModal(true)}
-            className="w-11 h-11 rounded-full apple-primary flex items-center justify-center"
-            title="Create group"
-          >
-            <Edit size={19} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowRequestsModal(true)}
+              className="relative w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200"
+              title="Friend Requests"
+            >
+              <UserPlus size={19} />
+              {friendRequests.incoming.length > 0 && (
+                <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-white">
+                  {friendRequests.incoming.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setShowGroupModal(true)}
+              className="w-11 h-11 rounded-full apple-primary flex items-center justify-center"
+              title="Create group"
+            >
+              <Edit size={19} />
+            </button>
+          </div>
         </div>
 
         <div className="relative">
@@ -831,12 +902,57 @@ const isMoreFilterActive = ["groups", "archived"].includes(activeFilter);
 
             {activeFilter === "all" && (
               <>
-                <div className="px-3 pt-5 pb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
-                  <Users size={14} />
-                  People
-                </div>
+                {!searchQuery && (
+                  <div className="px-3 pt-5 pb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
+                    <Users size={14} />
+                    Friends
+                  </div>
+                )}
+                {searchQuery && (
+                  <div className="px-3 pt-5 pb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
+                    <Search size={14} />
+                    Global Search
+                  </div>
+                )}
 
-                {filteredUsers.map((user) => {
+                {searchQuery && isSearchingGlobal && (
+                  <div className="px-4 py-4 text-sm text-slate-400">Searching global users...</div>
+                )}
+
+                {searchQuery && !isSearchingGlobal && globalSearchResults.length === 0 && (
+                  <div className="px-4 py-4 text-sm text-slate-400">No new users found</div>
+                )}
+
+                {searchQuery && !isSearchingGlobal && globalSearchResults.map((user) => {
+                  const isFriend = users.some(u => u._id === user._id);
+                  const isIncoming = friendRequests.incoming.some(r => (r._id || r) === user._id);
+                  const isOutgoing = friendRequests.outgoing.some(r => (r._id || r) === user._id);
+
+                  return (
+                    <div key={user._id} className="w-full text-left rounded-[26px] p-3 mb-2 hover:bg-white/88 apple-card-hover flex items-center justify-between group">
+                      <div className="flex gap-3 items-center flex-1 min-w-0 pr-3">
+                        <Avatar user={user} />
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-black text-slate-950 truncate">{getUserName(user)}</h3>
+                          <p className="truncate text-sm text-slate-500">{user.username}</p>
+                        </div>
+                      </div>
+                      <div>
+                        {isFriend ? (
+                          <button onClick={() => handleStartChat(user)} className="text-xs px-4 py-2 bg-emerald-100 text-emerald-700 rounded-full font-bold">Chat</button>
+                        ) : isIncoming ? (
+                          <button onClick={() => handleAcceptRequest(user._id)} className="text-xs px-4 py-2 bg-emerald-500 text-white rounded-full font-bold">Accept</button>
+                        ) : isOutgoing ? (
+                          <span className="text-xs px-4 py-2 bg-slate-100 text-slate-500 rounded-full font-bold">Pending</span>
+                        ) : (
+                          <button onClick={() => handleSendRequest(user._id)} className="text-xs px-4 py-2 bg-indigo-100 text-indigo-700 rounded-full font-bold hover:bg-indigo-200">Add</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {!searchQuery && filteredUsers.map((user) => {
                   const isOnline =
                     onlineUsers.includes(user._id) &&
                     user?.privacy?.lastSeen !== "Nobody";
@@ -1126,6 +1242,80 @@ const isMoreFilterActive = ["groups", "archived"].includes(activeFilter);
                 {creatingGroup && <Loader2 size={16} className="animate-spin" />}
                 Create
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRequestsModal && (
+        <div className="fixed inset-0 z-[1000000] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => setShowRequestsModal(false)}
+          />
+
+          <div className="relative w-full max-w-md bg-white rounded-[28px] shadow-2xl flex flex-col max-h-[80vh] p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-black text-slate-950">
+                Friend Requests
+              </h2>
+
+              <button
+                type="button"
+                onClick={() => setShowRequestsModal(false)}
+                className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4">
+              {friendRequests.incoming.length === 0 && friendRequests.outgoing.length === 0 ? (
+                <div className="py-10 text-center text-slate-400 font-bold">
+                  No pending friend requests
+                </div>
+              ) : (
+                <>
+                  {friendRequests.incoming.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wide text-slate-400 mb-2">Incoming</h3>
+                      {friendRequests.incoming.map((req) => (
+                        <div key={req._id} className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50">
+                          <div className="flex items-center gap-3">
+                            <Avatar user={req} />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-black text-slate-950 truncate">{getUserName(req)}</div>
+                              <div className="text-sm text-slate-500 truncate">{req.username}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => handleAcceptRequest(req._id)} className="px-3 py-1.5 bg-emerald-100 text-emerald-700 font-bold text-xs rounded-full">Accept</button>
+                            <button onClick={() => handleDeclineRequest(req._id)} className="px-3 py-1.5 bg-slate-100 text-slate-600 font-bold text-xs rounded-full">Decline</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {friendRequests.outgoing.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wide text-slate-400 mb-2 mt-4">Outgoing</h3>
+                      {friendRequests.outgoing.map((req) => (
+                        <div key={req._id} className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50">
+                          <div className="flex items-center gap-3">
+                            <Avatar user={req} />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-black text-slate-950 truncate">{getUserName(req)}</div>
+                              <div className="text-sm text-slate-500 truncate">{req.username}</div>
+                            </div>
+                          </div>
+                          <span className="text-xs px-3 py-1.5 text-slate-500 font-bold">Pending</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
