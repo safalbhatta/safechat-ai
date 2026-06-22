@@ -80,6 +80,7 @@ export default function ChatArea({
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [isOtherTyping, setIsOtherTyping] = useState(false);
   const [activeMessageMenu, setActiveMessageMenu] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -106,10 +107,19 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const recordingTimerRef = useRef(null);
   const recordingStartedAtRef = useRef(null);
 
+  const blockedContactsRef = useRef(currentUser?.blockedContacts || []);
+  useEffect(() => {
+    blockedContactsRef.current = currentUser?.blockedContacts || [];
+  }, [currentUser?.blockedContacts]);
+
+  useEffect(() => {
+    setIsTyping(false);
+    setIsOtherTyping(false);
+  }, [chat?._id]);
+
   useEffect(() => {
     if (!currentUserId || !globalSocket) return;
 
-    setIsTyping(false);
     socketRef.current = globalSocket;
 
     const handleReceiveMessage = (incomingMessage) => {
@@ -146,25 +156,25 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     };
 
     const handleTypingSocket = (data) => {
-      const isSenderBlocked = currentUser?.blockedContacts?.some(
+      const isSenderBlocked = blockedContactsRef.current.some(
         (contact) => (contact._id || contact).toString() === data.senderId?.toString()
       );
       if (isSenderBlocked) return;
 
       if (chat?._id && data.chatId === chat._id) {
-        setIsTyping(true);
+        setIsOtherTyping(true);
       }
       onTypingUpdate?.({ chatId: data.chatId, isTyping: true });
     };
 
     const handleStopTypingSocket = (data) => {
-      const isSenderBlocked = currentUser?.blockedContacts?.some(
+      const isSenderBlocked = blockedContactsRef.current.some(
         (contact) => (contact._id || contact).toString() === data.senderId?.toString()
       );
       if (isSenderBlocked) return;
 
       if (chat?._id && data.chatId === chat._id) {
-        setIsTyping(false);
+        setIsOtherTyping(false);
       }
       onTypingUpdate?.({ chatId: data.chatId, isTyping: false });
     };
@@ -180,9 +190,18 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
       globalSocket.off("typing", handleTypingSocket);
       globalSocket.off("stopTyping", handleStopTypingSocket);
 
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        if (socketRef.current && chat?._id && otherUser?._id && currentUserId) {
+          socketRef.current.emit("stopTyping", {
+            receiverId: otherUser._id,
+            senderId: currentUserId,
+            chatId: chat._id,
+          });
+        }
+      }
     };
-  }, [currentUserId, chat?._id, onMessageSent, onTypingUpdate, globalSocket, currentUser]);
+  }, [currentUserId, chat?._id, onMessageSent, onTypingUpdate, globalSocket, otherUser?._id]);
 
   useEffect(() => {
   const handleClickOutside = () => {
@@ -310,8 +329,14 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
         message: savedMessage,
       });
 
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+
       socketRef.current?.emit("stopTyping", {
         receiverId: otherUser._id,
+        senderId: currentUserId,
         chatId: chat._id,
       });
 
@@ -324,26 +349,34 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     }
   };
 
+  const lastTypingEmitTimeRef = useRef(0);
+
   const handleTyping = (e) => {
     setMessage(e.target.value);
 
     if (!socketRef.current || !otherUser?._id || !chat?._id) return;
 
-    socketRef.current.emit("typing", {
-      receiverId: otherUser._id,
-      senderId: currentUserId,
-      senderName: getUserName(currentUser),
-      chatId: chat._id,
-    });
+    const now = Date.now();
+    if (now - lastTypingEmitTimeRef.current > 2000) {
+      socketRef.current.emit("typing", {
+        receiverId: otherUser._id,
+        senderId: currentUserId,
+        senderName: getUserName(currentUser),
+        chatId: chat._id,
+      });
+      lastTypingEmitTimeRef.current = now;
+    }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     typingTimeoutRef.current = setTimeout(() => {
-      socketRef.current.emit("stopTyping", {
+      socketRef.current?.emit("stopTyping", {
         receiverId: otherUser._id,
         senderId: currentUserId,
         chatId: chat._id,
       });
+      lastTypingEmitTimeRef.current = 0;
+      typingTimeoutRef.current = null;
     }, 2000);
   };
 
@@ -1352,8 +1385,8 @@ const handleDeleteCurrentChat = async () => {
             })
           )}
 
-          {isTyping && (
-            <div className="flex justify-start">
+          {isOtherTyping && (
+            <div className="flex justify-start mb-6 px-6 animate-fade-in-up">
               <div className="max-w-[76%] flex flex-col items-start">
                 <div className="px-4 py-3.5 text-[15px] leading-6 message-in rounded-[22px] rounded-bl-[6px] flex gap-1.5 items-center h-[44px]">
                   <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>

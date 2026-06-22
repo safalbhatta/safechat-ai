@@ -1,18 +1,7 @@
 import { useState, useEffect } from "react";
-import {
-  Camera,
-  MapPin,
-  CalendarDays,
-  Link as LinkIcon,
-  Image,
-  FileText,
-  Link2,
-  MessageSquare,
-  Users,
-  ShieldCheck,
-  Edit3,
-  Settings,
-} from "lucide-react";
+import { MessageSquare, UserPlus, Calendar, Hash } from "lucide-react";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
+import { motion } from "motion/react";
 import { currentUser as fallbackUser } from "../data/mockData.js";
 
 function getLoggedInUser() {
@@ -28,14 +17,14 @@ function getLoggedInUser() {
       : `@${savedUser.username}`,
     bio:
       savedUser.bio ||
-      "Building modern messaging experiences with clean design, fast interactions, and real-time communication.",
+      "Product Engineer",
     location: savedUser.location || "Atlanta, GA",
-    website: savedUser.website || "chater.app",
-    joinedDate: savedUser.joinedDate || "Joined 2026",
+    joinedDate: savedUser.joinedDate || "Jan 2023",
   };
 }
 
 function initials(name) {
+  if (!name) return "U";
   return name
     .split(" ")
     .map((part) => part[0])
@@ -44,46 +33,35 @@ function initials(name) {
     .toUpperCase();
 }
 
-const stats = [
-  {
-    label: "Messages",
-    value: "2,834",
-    icon: MessageSquare,
-    color: "text-indigo-600",
-    bg: "bg-indigo-50",
-  },
-  {
-    label: "Contacts",
-    value: "127",
-    icon: Users,
-    color: "text-purple-600",
-    bg: "bg-purple-50",
-  },
-  {
-    label: "Media",
-    value: "458",
-    icon: Image,
-    color: "text-cyan-600",
-    bg: "bg-cyan-50",
-  },
-  {
-    label: "Files",
-    value: "156",
-    icon: FileText,
-    color: "text-orange-600",
-    bg: "bg-orange-50",
-  },
+const donutData = [
+  { name: "Normal", value: 7842, color: "#22C55E" },
+  { name: "Spam", value: 423, color: "#F59E0B" },
+  { name: "Abusive", value: 187, color: "#EF4444" },
+  { name: "Hateful", value: 48, color: "#991B1B" },
 ];
 
-const tabs = [
-  { id: "media", label: "Media", icon: Image },
-  { id: "files", label: "Files", icon: FileText },
-  { id: "links", label: "Links", icon: Link2 },
+const STATS = [
+  { icon: <MessageSquare className="w-5 h-5" />, label: "Total Messages", value: "8,500", color: "#6C63FF" },
+  { icon: <UserPlus className="w-5 h-5" />, label: "Friends", value: "342", color: "#22C55E" },
+  { icon: <Calendar className="w-5 h-5" />, label: "Joined", value: "Jan 2023", color: "#8B5CF6" },
+  { icon: <Hash className="w-5 h-5" />, label: "Safety Score", value: "92%", color: "#F59E0B" },
 ];
+
+const CustomTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="px-3 py-2 rounded-xl text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 shadow-lg">
+        <p style={{ color: payload[0].payload.color }}>
+          <span className="text-slate-700 dark:text-slate-300">{payload[0].name}:</span> <strong>{payload[0].value.toLocaleString()}</strong>
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function Profile() {
   const [currentUser, setCurrentUser] = useState(getLoggedInUser());
-  const [activeTab, setActiveTab] = useState("media");
 
   useEffect(() => {
     const handleUserUpdated = () => {
@@ -94,245 +72,163 @@ export default function Profile() {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto bg-gradient-to-br from-white/70 via-slate-50/80 to-indigo-50/60">
-      <div className="max-w-7xl mx-auto p-5 md:p-8">
-        <div className="relative overflow-hidden rounded-[34px] bg-slate-950 shadow-[0_28px_80px_rgba(15,23,42,0.22)]">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(99,102,241,0.72),transparent_32%),radial-gradient(circle_at_82%_12%,rgba(139,92,246,0.72),transparent_34%),linear-gradient(135deg,#111827,#312e81)]" />
+    <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-900 rounded-[34px]">
+      {/* Hero banner */}
+      <div className="h-48 relative bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-slate-50 dark:from-indigo-500/20 dark:via-purple-500/20 dark:to-slate-900">
+        <div
+          className="absolute inset-0"
+          style={{
+            background: "url('https://images.unsplash.com/photo-1557683316-973673baf926?w=1200&h=200&fit=crop&auto=format') center/cover",
+            opacity: 0.15,
+          }}
+        />
+      </div>
 
-          <div className="relative z-10 p-6 md:p-8">
-            <div className="flex justify-between items-start">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/12 border border-white/15 text-white/90 text-xs font-black backdrop-blur-xl">
-                <ShieldCheck size={14} />
-                Verified Profile
+      <div className="px-6 md:px-10 pb-10">
+        {/* Profile row */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-4 -mt-16 mb-6">
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 200 }}
+          >
+            <div className="relative p-1 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 inline-block">
+              <div 
+                className="w-28 h-28 rounded-full overflow-hidden flex items-center justify-center font-bold text-4xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white"
+              >
+                {currentUser.avatar ? (
+                  <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  initials(currentUser.name)
+                )}
               </div>
-
-              <div className="flex gap-2">
-                <button className="w-11 h-11 rounded-2xl bg-white/12 border border-white/15 text-white hover:bg-white/20 flex items-center justify-center backdrop-blur-xl">
-                  <Camera size={19} />
-                </button>
-
-                <button className="w-11 h-11 rounded-2xl bg-white/12 border border-white/15 text-white hover:bg-white/20 flex items-center justify-center backdrop-blur-xl">
-                  <Settings size={19} />
-                </button>
-              </div>
+              <span className="absolute bottom-2 right-2 w-4 h-4 rounded-full bg-green-500 border-[3px] border-slate-50 dark:border-slate-900" />
             </div>
+          </motion.div>
 
-            <div className="mt-14 md:mt-20 flex flex-col md:flex-row md:items-end md:justify-between gap-6">
-              <div className="flex flex-col md:flex-row md:items-end gap-5">
-                <div className="relative">
-                  <div className="w-28 h-28 md:w-32 md:h-32 rounded-[34px] bg-gradient-to-br from-[#6366F1] via-[#8B5CF6] to-[#06B6D4] text-white flex items-center justify-center text-5xl font-black border-4 border-white/90 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
-                    {initials(currentUser.name)}
-                  </div>
+          <div className="flex-1 pb-2">
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white font-[Poppins,sans-serif]">
+              {currentUser.name}
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              {currentUser.username} · {currentUser.bio}
+            </p>
+          </div>
 
-                  <button className="absolute -right-2 -bottom-2 w-11 h-11 rounded-2xl bg-white text-indigo-600 shadow-[0_12px_26px_rgba(0,0,0,0.18)] flex items-center justify-center">
-                    <Camera size={18} />
-                  </button>
-                </div>
-
-                <div className="pb-1">
-                  <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight">
-                    {currentUser.name}
-                  </h1>
-
-                  <p className="text-indigo-100 font-bold mt-1">
-                    {currentUser.username}
-                  </p>
-
-                  <p className="text-white/82 mt-4 max-w-2xl leading-7">
-                    {currentUser.bio}
-                  </p>
-
-                  <div className="flex flex-wrap gap-4 mt-4 text-sm text-white/78">
-                    <span className="inline-flex items-center gap-2">
-                      <MapPin size={16} />
-                      {currentUser.location}
-                    </span>
-
-                    <span className="inline-flex items-center gap-2">
-                      <LinkIcon size={16} />
-                      {currentUser.website}
-                    </span>
-
-                    <span className="inline-flex items-center gap-2">
-                      <CalendarDays size={16} />
-                      {currentUser.joinedDate}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <button className="h-12 px-5 rounded-2xl bg-white text-indigo-700 font-black shadow-[0_18px_42px_rgba(0,0,0,0.18)] hover:bg-indigo-50 flex items-center gap-2 justify-center">
-                <Edit3 size={18} />
-                Edit Profile
-              </button>
-            </div>
+          <div className="flex gap-3 pb-2">
+            <button className="px-4 py-2 font-medium text-sm rounded-lg flex items-center gap-2 transition-opacity hover:opacity-80 bg-white/60 dark:bg-white/5 border border-slate-200 dark:border-white/15 text-slate-700 dark:text-white">
+              Edit Profile
+            </button>
+            <button className="px-4 py-2 font-medium text-sm rounded-lg flex items-center gap-2 transition-opacity hover:opacity-80 bg-gradient-to-br from-indigo-500 to-purple-500 text-white border-none">
+              <MessageSquare className="w-4 h-4" />
+              Message
+            </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mt-5">
-          {stats.map((stat) => {
-            const Icon = stat.icon;
-
-            return (
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          {STATS.map((s, i) => (
+            <motion.div
+              key={s.label}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.08 }}
+              className="p-5 rounded-2xl bg-white/80 dark:bg-slate-800/70 border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-sm dark:shadow-none"
+            >
               <div
-                key={stat.label}
-                className="premium-card rounded-[28px] p-5 transition-all"
+                className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
+                style={{ background: `${s.color}18`, color: s.color }}
               >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className={`text-3xl font-black ${stat.color}`}>
-                      {stat.value}
-                    </p>
-                    <p className="text-sm font-black text-slate-500 mt-1">
-                      {stat.label}
-                    </p>
-                  </div>
-
-                  <div
-                    className={`w-13 h-13 rounded-2xl ${stat.bg} ${stat.color} flex items-center justify-center`}
-                  >
-                    <Icon size={22} />
-                  </div>
-                </div>
+                {s.icon}
               </div>
-            );
-          })}
+              <p className="text-2xl font-bold mb-0.5 text-slate-900 dark:text-white font-[Poppins,sans-serif]">
+                {s.value}
+              </p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{s.label}</p>
+            </motion.div>
+          ))}
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-5 mt-5">
-          <div className="premium-card rounded-[32px] p-5 md:p-6">
-            <div className="flex gap-2 border-b border-slate-200/80 mb-6 overflow-x-auto">
-              {tabs.map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
-
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`px-5 py-3 font-black flex items-center gap-2 border-b-2 -mb-px ${
-                      isActive
-                        ? "text-indigo-600 border-indigo-600"
-                        : "text-slate-500 border-transparent hover:text-indigo-600"
-                    }`}
+        {/* AI Analysis */}
+        <div className="grid md:grid-cols-2 gap-6">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="p-6 rounded-2xl bg-white/80 dark:bg-slate-800/70 border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-sm dark:shadow-none"
+          >
+            <h3 className="mb-1 text-lg font-medium text-slate-900 dark:text-white font-[Poppins,sans-serif]">
+              AI Message Analysis
+            </h3>
+            <p className="text-sm mb-6 text-slate-500 dark:text-slate-400">
+              Breakdown of your message categories
+            </p>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={donutData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={3}
+                    dataKey="value"
                   >
-                    <Icon size={18} />
-                    {tab.label}
-                  </button>
+                    {donutData.map((entry) => (
+                      <Cell key={entry.name} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend
+                    formatter={(value) => <span className="text-slate-500 dark:text-slate-400 text-[13px]">{value}</span>}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="p-6 rounded-2xl bg-white/80 dark:bg-slate-800/70 border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-sm dark:shadow-none"
+          >
+            <h3 className="mb-1 text-lg font-medium text-slate-900 dark:text-white font-[Poppins,sans-serif]">
+              Category Breakdown
+            </h3>
+            <p className="text-sm mb-6 text-slate-500 dark:text-slate-400">
+              Detailed message statistics
+            </p>
+            <div className="space-y-4">
+              {donutData.map((d) => {
+                const pct = Math.round((d.value / 8500) * 100);
+                return (
+                  <div key={d.name}>
+                    <div className="flex justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.color }} />
+                        <span className="text-sm text-slate-500 dark:text-slate-400">{d.name}</span>
+                      </div>
+                      <span className="text-sm font-medium text-slate-900 dark:text-white">
+                        {d.value.toLocaleString()} ({pct}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-white/10">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{ duration: 0.8, delay: 0.5 }}
+                        className="h-2 rounded-full"
+                        style={{ background: d.color }}
+                      />
+                    </div>
+                  </div>
                 );
               })}
             </div>
-
-            {activeTab === "media" && (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {[1, 2, 3, 4, 5, 6].map((item) => (
-                  <div
-                    key={item}
-                    className="aspect-video rounded-[24px] overflow-hidden bg-gradient-to-br from-indigo-100 via-purple-100 to-cyan-100 border border-white shadow-[0_12px_30px_rgba(99,102,241,0.12)] group"
-                  >
-                    <div className="h-full flex items-center justify-center text-indigo-500 group-hover:scale-110 transition-transform">
-                      <Image size={34} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {activeTab === "files" && (
-              <div className="space-y-3">
-                {["Project brief.pdf", "Design system.fig", "Meeting notes.docx"].map(
-                  (file) => (
-                    <div
-                      key={file}
-                      className="flex items-center gap-4 p-4 rounded-2xl bg-white/70 border border-slate-200 hover:border-indigo-200 hover:shadow-md transition-all"
-                    >
-                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                        <FileText size={21} />
-                      </div>
-                      <div>
-                        <p className="font-black text-slate-900">{file}</p>
-                        <p className="text-sm text-slate-500">Shared recently</p>
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-
-            {activeTab === "links" && (
-              <div className="space-y-3">
-                {["https://chater.app", "https://github.com", "https://figma.com"].map(
-                  (link) => (
-                    <div
-                      key={link}
-                      className="flex items-center gap-4 p-4 rounded-2xl bg-white/70 border border-slate-200 hover:border-indigo-200 hover:shadow-md transition-all"
-                    >
-                      <div className="w-12 h-12 rounded-2xl bg-cyan-50 text-cyan-600 flex items-center justify-center">
-                        <Link2 size={21} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-black text-slate-900 truncate">{link}</p>
-                        <p className="text-sm text-slate-500">Saved link</p>
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-5">
-            <div className="premium-card rounded-[32px] p-6">
-              <h2 className="text-xl font-black text-slate-950 mb-4">
-                Account Overview
-              </h2>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-bold">Status</span>
-                  <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 text-sm font-black">
-                    Online
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-bold">Plan</span>
-                  <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-600 text-sm font-black">
-                    Free
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-bold">Security</span>
-                  <span className="px-3 py-1 rounded-full bg-purple-50 text-purple-600 text-sm font-black">
-                    Protected
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="premium-card rounded-[32px] p-6">
-              <h2 className="text-xl font-black text-slate-950 mb-4">
-                Recent Activity
-              </h2>
-
-              <div className="space-y-4">
-                {[
-                  "Updated profile information",
-                  "Joined 3 new conversations",
-                  "Shared 12 media files",
-                ].map((item) => (
-                  <div key={item} className="flex gap-3">
-                    <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 mt-2" />
-                    <div>
-                      <p className="font-bold text-slate-800">{item}</p>
-                      <p className="text-sm text-slate-500">Today</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          </motion.div>
         </div>
       </div>
     </div>

@@ -18,9 +18,9 @@ export default function Messages() {
     setShowConversationList(false);
   };
 
-  const refreshChats = () => {
+  const refreshChats = useCallback(() => {
     setReloadKey((prev) => prev + 1);
-  };
+  }, []);
 
   const handleTypingUpdate = useCallback((data) => {
     setTypingChats((prev) => ({ ...prev, [data.chatId]: data.isTyping }));
