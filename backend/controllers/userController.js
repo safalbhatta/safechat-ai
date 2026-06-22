@@ -32,7 +32,31 @@ const searchUsers = async (req, res) => {
       ]
     }).select("-password");
 
-    res.json(users);
+    // Sort users by relevance
+    const lowerQuery = query.toLowerCase();
+    const sortedUsers = users.sort((a, b) => {
+      const aName = (a.name || "").toLowerCase();
+      const aUser = (a.username || "").toLowerCase();
+      const bName = (b.name || "").toLowerCase();
+      const bUser = (b.username || "").toLowerCase();
+
+      // 1. Exact match (highest priority)
+      const aExact = aName === lowerQuery || aUser === lowerQuery;
+      const bExact = bName === lowerQuery || bUser === lowerQuery;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+
+      // 2. Starts with query (second priority)
+      const aStarts = aName.startsWith(lowerQuery) || aUser.startsWith(lowerQuery);
+      const bStarts = bName.startsWith(lowerQuery) || bUser.startsWith(lowerQuery);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+
+      // 3. Fallback to alphabetical sorting
+      return aName.localeCompare(bName);
+    });
+
+    res.json(sortedUsers);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
