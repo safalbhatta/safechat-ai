@@ -9,6 +9,7 @@ const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 
@@ -28,6 +29,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 const server = http.createServer(app);
 
@@ -41,6 +43,8 @@ const io = new Server(server, {
 app.set("io", io);
 
 const onlineUsers = new Map();
+const activeChats = new Map();
+io.activeChats = activeChats;
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
@@ -50,6 +54,15 @@ io.on("connection", (socket) => {
     onlineUsers.set(userId, socket.id);
     io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
     console.log("Online users:", onlineUsers);
+  });
+
+  socket.on("activeChat", ({ userId, chatId }) => {
+    if (!userId || !chatId) return;
+    activeChats.set(socket.id, { userId: userId.toString(), chatId: chatId.toString() });
+  });
+
+  socket.on("leaveChat", () => {
+    activeChats.delete(socket.id);
   });
 
   socket.on("sendMessage", ({ receiverId, message }) => {
@@ -93,6 +106,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
+    activeChats.delete(socket.id);
     for (const [userId, socketId] of onlineUsers.entries()) {
       if (socketId === socket.id) {
         onlineUsers.delete(userId);

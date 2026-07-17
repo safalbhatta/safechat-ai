@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   MessageSquare,
@@ -10,6 +10,7 @@ import {
   LogOut,
   User,
 } from "lucide-react";
+import { useSocket } from "../../context/SocketContext.jsx";
 
 const navItems = [
   { icon: MessageSquare, label: "Chats", path: "/app" },
@@ -24,6 +25,7 @@ const navItems = [
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { notificationUnreadCount } = useSocket();
   const [user, setUser] = useState(JSON.parse(sessionStorage.getItem("user") || "{}"));
   
   useEffect(() => {
@@ -75,6 +77,11 @@ export default function Sidebar() {
                 <span className="absolute -left-3 top-1/2 -translate-y-1/2 w-1.5 h-7 rounded-full bg-[#6366F1]" />
               )}
               <Icon size={22} />
+              {item.path === "/app/notifications" && notificationUnreadCount > 0 && (
+                <span className="absolute -right-1 -top-1 min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center border-2 border-white">
+                  {notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
+                </span>
+              )}
             </button>
           );
         })}

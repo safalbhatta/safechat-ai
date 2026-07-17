@@ -246,6 +246,19 @@ export default function ConversationList({
   }, [loadData, reloadKey, globalSocket]);
 
   useEffect(() => {
+    const requestedChatId = new URLSearchParams(location.search).get("chat");
+
+    if (!requestedChatId || !chats.length || selectedChatId === requestedChatId) {
+      return;
+    }
+
+    const requestedChat = chats.find((chat) => chat._id === requestedChatId);
+    if (!requestedChat) return;
+
+    onSelectChat(requestedChat, getChatTarget(requestedChat));
+  }, [location.search, chats, selectedChatId, onSelectChat, getChatTarget]);
+
+  useEffect(() => {
     if (panelMode !== "newFriend") return;
 
     const loadSuggestions = async () => {

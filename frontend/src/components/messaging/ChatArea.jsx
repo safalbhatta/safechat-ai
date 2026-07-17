@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { useSocket } from "../../context/SocketContext.jsx";
 import {
   Phone,
@@ -120,6 +120,22 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   }, [chat?._id]);
 
   useEffect(() => {
+    if (!globalSocket || !currentUserId || !chat?._id) return;
+
+    globalSocket.emit("activeChat", {
+      userId: currentUserId,
+      chatId: chat._id,
+    });
+
+    return () => {
+      globalSocket.emit("leaveChat", {
+        userId: currentUserId,
+        chatId: chat._id,
+      });
+    };
+  }, [globalSocket, currentUserId, chat?._id]);
+
+  useEffect(() => {
     if (!currentUserId || !globalSocket) return;
 
     socketRef.current = globalSocket;
@@ -129,6 +145,9 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
         api
           .get(`/messages/${chat._id}`)
           .catch((err) => console.log("Failed to mark as viewed", err));
+        api
+          .patch(`/notifications/chat/${chat._id}/read`)
+          .catch((err) => console.log("Failed to mark chat notifications as read", err));
       }
 
       setMessages((prev) => {
@@ -229,6 +248,11 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
         setLoadingMessages(true);
         const res = await api.get(`/messages/${chat._id}`);
         setMessages(res.data || []);
+        api
+          .patch(`/notifications/chat/${chat._id}/read`)
+          .catch((error) =>
+            console.log("Failed to mark chat notifications as read", error)
+          );
       } catch (error) {
         console.error("Failed to load messages:", error);
         setNotice("Failed to load messages");

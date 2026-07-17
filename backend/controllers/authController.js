@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { createNotification } = require("../services/notificationService");
 
 const parseUserAgent = (ua) => {
   if (!ua) return { browser: "Unknown Browser", device: "Unknown Device" };
@@ -67,6 +68,16 @@ const registerUser = async (req, res) => {
 
     const populatedUser = await User.findById(user._id).populate("blockedContacts", "name username bio profilePic");
 
+    await createNotification({
+      io: req.app.get("io"),
+      recipientId: user._id,
+      actorId: user._id,
+      type: "system",
+      title: "Welcome to SafeChat AI",
+      body: "Your account is ready. Notification preferences can be managed from the Activity Center.",
+      metadata: { action: "account_created" },
+    });
+
     res.status(201).json({
       _id: populatedUser._id,
       name: populatedUser.name,
@@ -114,6 +125,17 @@ const loginUser = async (req, res) => {
     const populatedUser = await User.findById(user._id).populate("blockedContacts", "name username bio profilePic");
 
     const io = req.app.get("io");
+
+    await createNotification({
+      io,
+      recipientId: user._id,
+      actorId: user._id,
+      type: "account",
+      title: "New login",
+      body: `Signed in using ${browser} on ${device}.`,
+      metadata: { action: "login", browser, device, ip },
+    });
+
     if (io) {
       io.to(user._id.toString()).emit("sessionCreated", {
         message: "New session started"

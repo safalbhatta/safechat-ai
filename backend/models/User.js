@@ -44,6 +44,16 @@ const userSchema = new mongoose.Schema(
       status: { type: String, enum: ['Everyone', 'My contacts', 'Selected contacts', 'Nobody'], default: 'My contacts' },
       calls: { type: String, enum: ['Everyone', 'Silence unknown callers'], default: 'Silence unknown callers' }
     },
+    notificationPreferences: {
+      enabled: { type: Boolean, default: true },
+      newMessages: { type: Boolean, default: true },
+      reactions: { type: Boolean, default: true },
+      contactRequests: { type: Boolean, default: true },
+      friendUpdates: { type: Boolean, default: true },
+      accountActivity: { type: Boolean, default: true },
+      sound: { type: Boolean, default: true },
+      desktop: { type: Boolean, default: true },
+    },
     blockedContacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     friendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

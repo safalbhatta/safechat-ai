@@ -1,5 +1,6 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
+const { createNotification } = require("../services/notificationService");
 
 const getUsers = async (req, res) => {
   try {
@@ -88,6 +89,17 @@ const sendFriendRequest = async (req, res) => {
     await targetUser.save();
 
     const io = req.app.get("io");
+
+    await createNotification({
+      io,
+      recipientId: targetUser._id,
+      actorId: currentUser._id,
+      type: "contact_request",
+      title: currentUser.name || currentUser.username || "New contact request",
+      body: "Sent you a contact request",
+      metadata: { requesterId: currentUser._id },
+    });
+
     if (io) {
       io.to(targetUser._id.toString()).emit("friendRequestReceived", {
         from: { _id: currentUser._id, username: currentUser.username, name: currentUser.name }
@@ -124,6 +136,17 @@ const acceptFriendRequest = async (req, res) => {
     await requesterUser.save();
 
     const io = req.app.get("io");
+
+    await createNotification({
+      io,
+      recipientId: requesterUser._id,
+      actorId: currentUser._id,
+      type: "friend_request_accepted",
+      title: currentUser.name || currentUser.username || "Contact request accepted",
+      body: "Accepted your contact request",
+      metadata: { friendId: currentUser._id },
+    });
+
     if (io) {
       io.to(requesterUser._id.toString()).emit("friendRequestAccepted", {
         from: { _id: currentUser._id, username: currentUser.username, name: currentUser.name }
@@ -273,6 +296,19 @@ const updateUserProfile = async (req, res) => {
         io.emit("userProfileUpdated", payload);
       }
 
+      await createNotification({
+        io,
+        recipientId: updatedUser._id,
+        actorId: updatedUser._id,
+        type: "account",
+        title: currentPassword && newPassword ? "Password updated" : "Profile updated",
+        body:
+          currentPassword && newPassword
+            ? "Your SafeChat password was changed successfully."
+            : "Your SafeChat profile settings were updated.",
+        metadata: { action: currentPassword && newPassword ? "password_changed" : "profile_updated" },
+      });
+
       res.json(payload);
     } else {
       res.status(404).json({ message: "User not found" });
@@ -358,6 +394,16 @@ const revokeSession = async (req, res) => {
 
     user.sessions = user.sessions.filter(s => s._id.toString() !== sessionId);
     await user.save();
+
+    await createNotification({
+      io: req.app.get("io"),
+      recipientId: user._id,
+      actorId: user._id,
+      type: "account",
+      title: "Session removed",
+      body: `A ${sessionToRevoke?.browser || "browser"} session on ${sessionToRevoke?.device || "a device"} was revoked.`,
+      metadata: { action: "session_revoked", sessionId },
+    });
     
     res.json({ message: "Session revoked successfully" });
   } catch (error) {

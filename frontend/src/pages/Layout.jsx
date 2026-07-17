@@ -46,7 +46,7 @@ const playNotificationSound = () => {
 };
 
 export default function Layout() {
-  const { socket } = useSocket();
+  const { notificationPreferences } = useSocket();
   const originalTitle = useRef(document.title);
 
   useEffect(() => {
@@ -73,43 +73,51 @@ export default function Layout() {
   }, []);
 
   useEffect(() => {
-    if (!socket) return;
+    const handleNotification = (event) => {
+      const notification = event.detail;
+      if (!notification || notificationPreferences.enabled === false) return;
 
-    const handleReceiveMessage = async (message) => {
-      try {
-        const currentUser = JSON.parse(sessionStorage.getItem("user") || "null");
-        if (!currentUser) return;
-
-        const senderId = message.senderId?._id || message.senderId;
-        const currentId = currentUser._id || currentUser.id;
-
-        if (senderId === currentId) return;
-
-        const notifSettings = JSON.parse(localStorage.getItem("notifications") || "{}");
-        if (notifSettings.newMessages === false) return;
-
-        const res = await api.get("/chats");
-        const chats = res.data;
-        const chat = chats.find((c) => c._id === message.chatId);
-
-        if (chat && chat.isMuted) return;
-
+      if (notificationPreferences.sound !== false) {
         playNotificationSound();
+      }
 
-        if (document.hidden) {
-          document.title = "New message!";
-        }
-      } catch (error) {
-        console.error("Failed to handle notification", error);
+      if (document.hidden) {
+        document.title = notification.title || "New SafeChat activity";
+      }
+
+      if (
+        notificationPreferences.desktop !== false &&
+        document.hidden &&
+        "Notification" in window &&
+        window.Notification.permission === "granted"
+      ) {
+        const desktopNotification = new window.Notification(
+          notification.title || "SafeChat AI",
+          {
+            body: notification.body || "You have new activity.",
+            icon: "/favicon.svg",
+            tag: notification._id,
+          }
+        );
+
+        desktopNotification.onclick = () => {
+          window.focus();
+          if (notification.chatId?._id || notification.chatId) {
+            const chatId = notification.chatId?._id || notification.chatId;
+            window.location.href = `/app?chat=${chatId}`;
+          } else {
+            window.location.href = "/app/notifications";
+          }
+          desktopNotification.close();
+        };
       }
     };
 
-    socket.on("receiveMessage", handleReceiveMessage);
-
+    window.addEventListener("safechat:notification", handleNotification);
     return () => {
-      socket.off("receiveMessage", handleReceiveMessage);
+      window.removeEventListener("safechat:notification", handleNotification);
     };
-  }, [socket]);
+  }, [notificationPreferences]);
 
   return (
     <div className="h-screen overflow-hidden p-4 md:p-5">

@@ -1,6 +1,11 @@
 const Message = require("../models/Message");
 const Chat = require("../models/Chat");
 const User = require("../models/User");
+const {
+  createMessageNotifications,
+  createReactionNotification,
+  updateMessageNotificationPreview,
+} = require("../services/notificationService");
 
 const isSameId = (id1, id2) => {
   return id1?.toString() === id2?.toString();
@@ -147,6 +152,13 @@ const sendMessage = async (req, res) => {
 
     const populatedMessage = await getMessageWithReply(message._id);
 
+    await createMessageNotifications({
+      io: req.app.get("io"),
+      chat,
+      sender: req.user,
+      message: populatedMessage,
+    });
+
     res.status(201).json(populatedMessage);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -221,6 +233,13 @@ const sendVoiceMessage = async (req, res) => {
     });
 
     const populatedMessage = await getMessageWithReply(message._id);
+
+    await createMessageNotifications({
+      io: req.app.get("io"),
+      chat,
+      sender: req.user,
+      message: populatedMessage,
+    });
 
     res.status(201).json(populatedMessage);
   } catch (error) {
@@ -327,6 +346,11 @@ const editMessage = async (req, res) => {
 
     const updatedMessage = await getMessageWithReply(message._id);
 
+    await updateMessageNotificationPreview({
+      io: req.app.get("io"),
+      message: updatedMessage,
+    });
+
     res.json(updatedMessage);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -369,6 +393,11 @@ const deleteMessage = async (req, res) => {
     await updateChatLastMessage(message.chatId);
 
     const updatedMessage = await getMessageWithReply(message._id);
+
+    await updateMessageNotificationPreview({
+      io: req.app.get("io"),
+      message: updatedMessage,
+    });
 
     res.json(updatedMessage);
   } catch (error) {
@@ -449,6 +478,13 @@ const forwardMessage = async (req, res) => {
     });
 
     const populatedMessage = await getMessageWithReply(forwardedMessage._id);
+
+    await createMessageNotifications({
+      io: req.app.get("io"),
+      chat: targetChat,
+      sender: req.user,
+      message: populatedMessage,
+    });
 
     res.status(201).json(populatedMessage);
   } catch (error) {
@@ -548,9 +584,11 @@ const reactToMessage = async (req, res) => {
     const existingReaction = message.reactions.find((reaction) =>
       isSameId(reaction.userId, req.user._id)
     );
+    let shouldNotifyReaction = true;
 
     if (existingReaction) {
       if (existingReaction.emoji === emoji) {
+        shouldNotifyReaction = false;
         message.reactions = message.reactions.filter(
           (reaction) => !isSameId(reaction.userId, req.user._id)
         );
@@ -569,6 +607,15 @@ const reactToMessage = async (req, res) => {
     await message.save();
 
     const updatedMessage = await getMessageWithReply(message._id);
+
+    if (shouldNotifyReaction) {
+      await createReactionNotification({
+        io: req.app.get("io"),
+        message: updatedMessage,
+        actor: req.user,
+        emoji,
+      });
+    }
 
     res.json(updatedMessage);
   } catch (error) {
