@@ -1,7 +1,9 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const User = require("../models/User");
 const { createNotification } = require("../services/notificationService");
+const { sendOtpEmail } = require("../services/emailService");
 
 const parseUserAgent = (ua) => {
   if (!ua) return { browser: "Unknown Browser", device: "Unknown Device" };
@@ -158,4 +160,121 @@ const loginUser = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser };
+// ── Forgot password: Step 1 — send OTP ────────────────────────────────────
+const sendOtp = async (req, res) => {
+  try {
+    const email = req.body.email?.trim().toLowerCase();
+    if (!email) return res.status(400).json({ message: "Email is required" });
+
+    const user = await User.findOne({ email });
+
+    // Always respond OK so we don't leak which emails are registered
+    if (!user) {
+      return res.json({ message: "If this email is registered, an OTP has been sent." });
+    }
+
+    // Generate a cryptographically random 6-digit OTP
+    const otp = String(crypto.randomInt(100000, 999999));
+    const salt = await bcrypt.genSalt(10);
+    const hashedOtp = await bcrypt.hash(otp, salt);
+
+    user.passwordResetOtp = hashedOtp;
+    user.passwordResetExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    await user.save();
+
+    await sendOtpEmail(email, otp, user.username || user.name);
+
+    res.json({ message: "If this email is registered, an OTP has been sent." });
+  } catch (error) {
+    console.error("sendOtp error:", error.message);
+    res.status(500).json({ message: "Failed to send OTP. Please try again." });
+  }
+};
+
+// ── Forgot password: Step 2 — verify OTP ──────────────────────────────────
+const verifyOtp = async (req, res) => {
+  try {
+    const email = req.body.email?.trim().toLowerCase();
+    const { otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ message: "Email and OTP are required" });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user || !user.passwordResetOtp || !user.passwordResetExpires) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    if (user.passwordResetExpires < new Date()) {
+      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+    }
+
+    const isMatch = await bcrypt.compare(otp, user.passwordResetOtp);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Incorrect OTP" });
+    }
+
+    res.json({ message: "OTP verified" });
+  } catch (error) {
+    console.error("verifyOtp error:", error.message);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ── Forgot password: Step 3 — reset password ──────────────────────────────
+const resetPassword = async (req, res) => {
+  try {
+    const email = req.body.email?.trim().toLowerCase();
+    const { otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: "Email, OTP and new password are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user || !user.passwordResetOtp || !user.passwordResetExpires) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    if (user.passwordResetExpires < new Date()) {
+      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+    }
+
+    const isMatch = await bcrypt.compare(otp, user.passwordResetOtp);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Incorrect OTP" });
+    }
+
+    // Hash new password and clear OTP fields
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    user.passwordResetOtp = null;
+    user.passwordResetExpires = null;
+    await user.save();
+
+    await createNotification({
+      io: null,
+      recipientId: user._id,
+      actorId: user._id,
+      type: "account",
+      title: "Password reset",
+      body: "Your SafeChat password was reset successfully.",
+      metadata: { action: "password_reset" },
+    });
+
+    res.json({ message: "Password reset successfully. You can now log in." });
+  } catch (error) {
+    console.error("resetPassword error:", error.message);
+    res.status(500).json({ message: error.message });
+  }
+};
+// ──────────────────────────────────────────────────────────────────────────
+
+module.exports = { registerUser, loginUser, sendOtp, verifyOtp, resetPassword };

@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSocket } from "../../context/SocketContext.jsx";
 import {
   Phone,
@@ -501,6 +501,10 @@ const [requestActionLoading, setRequestActionLoading] = useState(false);
       return "Voice message";
     }
 
+    if (msg.messageType === "image") {
+      return "📷 Photo";
+    }
+
     return msg.text || "";
   };
 
@@ -603,6 +607,49 @@ const [requestActionLoading, setRequestActionLoading] = useState(false);
       setMessage(text);
     }
   };
+
+  // ── Image upload handler ──────────────────────────────────────────────────
+  const imageInputRef = useRef(null);
+  const [sendingImage, setSendingImage] = useState(false);
+
+  const handleSendImage = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !chat?._id) return;
+
+    if (isPendingMessageRequest) {
+      setNotice("Send a text message request first. Images are available after it is accepted");
+      e.target.value = "";
+      return;
+    }
+
+    setSendingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      formData.append("chatId", chat._id);
+      if (!isGroupChat && directReceiverId) {
+        formData.append("receiverId", directReceiverId);
+      }
+
+      const res = await api.post("/messages/image", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const savedMessage = res.data;
+
+      setMessages((prev) => [...prev, savedMessage]);
+      socketRef.current?.emit("sendMessage", {
+        chatId: chat._id,
+        message: savedMessage,
+      });
+    } catch (error) {
+      console.error("Failed to send image:", error);
+      setNotice(error.response?.data?.message || "Failed to send image");
+    } finally {
+      setSendingImage(false);
+      e.target.value = "";
+    }
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   const lastTypingEmitTimeRef = useRef(0);
 
@@ -1986,6 +2033,15 @@ const handleDeleteMessageRequest = async () => {
                               : ""}
                           </div>
                         </div>
+                      ) : msg.messageType === "image" && msg.imageUrl ? (
+                        <a href={msg.imageUrl} target="_blank" rel="noopener noreferrer">
+                          <img
+                            src={msg.imageUrl}
+                            alt="Shared image"
+                            className="max-w-[260px] max-h-[320px] rounded-2xl object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
+                            loading="lazy"
+                          />
+                        </a>
                       ) : (
                         msg.text
                       )}
@@ -2743,11 +2799,27 @@ const handleDeleteMessageRequest = async () => {
                 <Paperclip size={20} />
               </button>
 
+              {/* Hidden file input for image upload */}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleSendImage}
+              />
+
               <button
                 type="button"
-                className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={sendingImage}
+                title="Send image"
+                className="w-10 h-10 rounded-full text-[#6366F1] hover:bg-[#F0EDFF] flex items-center justify-center disabled:opacity-50"
               >
-                <ImageIcon size={20} />
+                {sendingImage ? (
+                  <div className="w-5 h-5 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <ImageIcon size={20} />
+                )}
               </button>
 
               <div className="relative flex-1">

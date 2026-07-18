@@ -31,6 +31,14 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    passwordResetOtp: {
+      type: String,        // stores bcrypt-hashed OTP
+      default: null,
+    },
+    passwordResetExpires: {
+      type: Date,          // OTP expiry (10 min from generation)
+      default: null,
+    },
     isOnline: {
       type: Boolean,
       default: false,

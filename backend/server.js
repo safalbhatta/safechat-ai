@@ -3,6 +3,7 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
+const ImageKit = require("imagekit");
 require("dotenv").config();
 const path = require("path");
 const authRoutes = require("./routes/authRoutes");
@@ -266,6 +267,34 @@ mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB connected successfully"))
   .catch((error) => console.error("MongoDB connection failed:", error.message));
+
+// ── ImageKit connection check ────────────────────────────────────────────────
+const checkImageKitConnection = async () => {
+  const { IMAGEKIT_PUBLIC_KEY, IMAGEKIT_PRIVATE_KEY, IMAGEKIT_URL_ENDPOINT } = process.env;
+
+  if (!IMAGEKIT_PUBLIC_KEY || !IMAGEKIT_PRIVATE_KEY || !IMAGEKIT_URL_ENDPOINT ||
+      IMAGEKIT_PUBLIC_KEY === "your_public_key") {
+    console.warn("⚠️  ImageKit: credentials not configured in .env — skipping check");
+    return;
+  }
+
+  try {
+    const imagekit = new ImageKit({
+      publicKey: IMAGEKIT_PUBLIC_KEY,
+      privateKey: IMAGEKIT_PRIVATE_KEY,
+      urlEndpoint: IMAGEKIT_URL_ENDPOINT,
+    });
+
+    // Ping ImageKit by listing up to 1 file — lightweight auth test
+    await imagekit.listFiles({ limit: 1 });
+    console.log("✅  ImageKit connected successfully —", IMAGEKIT_URL_ENDPOINT);
+  } catch (error) {
+    console.error("❌  ImageKit connection failed:", error.message || error);
+  }
+};
+
+checkImageKitConnection();
+// ────────────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 5002;
 

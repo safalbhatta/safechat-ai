@@ -1,7 +1,9 @@
 const Message = require("../models/Message");
 const Chat = require("../models/Chat");
 const User = require("../models/User");
+const path = require("path");
 const { classifyText } = require("../services/mlService");
+const { uploadToImageKit } = require("../services/imagekitService");
 const {
   createMessageNotifications,
   createReactionNotification,
@@ -61,6 +63,10 @@ const getMessagePreview = (message) => {
 
   if (message.messageType === "voice") {
     return "Voice message";
+  }
+
+  if (message.messageType === "image") {
+    return "📷 Photo";
   }
 
   if (
@@ -515,6 +521,92 @@ const sendVoiceMessage = async (req, res) => {
       $pull: {
         deletedFor: { $in: allMemberIds },
       },
+    });
+
+    const populatedMessage = await getMessageWithReply(message._id);
+
+    await createMessageNotifications({
+      io: req.app.get("io"),
+      chat,
+      sender: req.user,
+      message: populatedMessage,
+    });
+
+    res.status(201).json(populatedMessage);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const sendImageMessage = async (req, res) => {
+  try {
+    const { chatId, receiverId } = req.body;
+
+    if (!chatId || !req.file) {
+      return res.status(400).json({ message: "Chat ID and image are required" });
+    }
+
+    const chat = await getChatAndCheckMember(chatId, req.user._id);
+
+    if (chat === null) return res.status(404).json({ message: "Chat not found" });
+    if (chat === false) return res.status(403).json({ message: "Not allowed" });
+
+    let directReceiverId = null;
+
+    if (!chat.isGroupChat) {
+      if (!receiverId) return res.status(400).json({ message: "Receiver is required" });
+
+      const receiverInChat = chat.members.some((memberId) => isSameId(memberId, receiverId));
+      if (!receiverInChat || isSameId(receiverId, req.user._id)) {
+        return res.status(400).json({ message: "Receiver is not in this chat" });
+      }
+
+      directReceiverId = receiverId;
+
+      const currentUser = await User.findById(req.user._id);
+      const receiverUser = await User.findById(directReceiverId);
+
+      if (currentUser?.blockedContacts?.some((id) => isSameId(id, directReceiverId))) {
+        return res.status(403).json({ message: "You have blocked this user" });
+      }
+      if (receiverUser?.blockedContacts?.some((id) => isSameId(id, req.user._id))) {
+        return res.status(403).json({ message: "You cannot send messages to this user" });
+      }
+
+      if ((chat.requestStatus || "accepted") === "pending") {
+        return res.status(403).json({
+          message: "Send a text message request first. Images are available after it is accepted",
+        });
+      }
+    }
+
+    // Upload to ImageKit
+    const ext = path.extname(req.file.originalname || "").toLowerCase() || ".jpg";
+    const fileName = `chat-${req.user._id}-${Date.now()}${ext}`;
+    const { url, fileId } = await uploadToImageKit(req.file.buffer, fileName, "chat-images");
+
+    const message = await Message.create({
+      chatId,
+      senderId: req.user._id,
+      receiverId: chat.isGroupChat ? null : directReceiverId,
+      readBy: [req.user._id],
+      messageType: "image",
+      text: "",
+      imageUrl: url,
+      imageFileId: fileId,
+      isViewed: false,
+      isEdited: false,
+      isDeleted: false,
+      isFlagged: false,
+      flagCategory: "None",
+      flagReason: "",
+      flagStatus: "None",
+    });
+
+    const allMemberIds = (chat.members || []).map((m) => m);
+    await Chat.findByIdAndUpdate(chatId, {
+      $set: { lastMessage: "📷 Photo" },
+      $pull: { deletedFor: { $in: allMemberIds } },
     });
 
     const populatedMessage = await getMessageWithReply(message._id);
@@ -1264,4 +1356,5 @@ module.exports = {
   getFlaggedSummary,
   getFlaggedMessages,
   updateFlagStatus,
+  sendImageMessage,
 };

@@ -1,8 +1,9 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const { createNotification } = require("../services/notificationService");
-const fs = require("fs");
+const { uploadToImageKit } = require("../services/imagekitService");
 const path = require("path");
+
 
 const getUsers = async (req, res) => {
   try {
@@ -463,32 +464,6 @@ const buildProfilePayload = (user) => ({
   blockedContacts: user.blockedContacts,
 });
 
-const removePreviousLocalProfilePicture = (profilePic) => {
-  try {
-    if (!profilePic) return;
-
-    const marker = "/uploads/profile-pictures/";
-    const markerIndex = profilePic.indexOf(marker);
-
-    if (markerIndex === -1) return;
-
-    const filename = path.basename(profilePic.slice(markerIndex + marker.length));
-    const filePath = path.join(
-      __dirname,
-      "..",
-      "uploads",
-      "profile-pictures",
-      filename
-    );
-
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-  } catch (error) {
-    console.error("Failed to remove old profile picture:", error.message);
-  }
-};
-
 const uploadProfilePicture = async (req, res) => {
   try {
     if (!req.file) {
@@ -496,20 +471,17 @@ const uploadProfilePicture = async (req, res) => {
     }
 
     const user = await User.findById(req.user._id);
-
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const previousProfilePic = user.profilePic;
-    const profilePic = `${req.protocol}://${req.get(
-      "host"
-    )}/uploads/profile-pictures/${req.file.filename}`;
+    // Upload buffer to ImageKit under the profile-pictures folder
+    const ext = path.extname(req.file.originalname || "").toLowerCase() || ".jpg";
+    const fileName = `profile-${req.user._id}-${Date.now()}${ext}`;
+    const { url } = await uploadToImageKit(req.file.buffer, fileName, "profile-pictures");
 
-    user.profilePic = profilePic;
+    user.profilePic = url;
     await user.save();
-
-    removePreviousLocalProfilePicture(previousProfilePic);
 
     const updatedUser = await User.findById(user._id).populate(
       "blockedContacts",
@@ -535,10 +507,6 @@ const uploadProfilePicture = async (req, res) => {
 
     res.json(payload);
   } catch (error) {
-    if (req.file?.path && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-
     res.status(500).json({ message: error.message });
   }
 };

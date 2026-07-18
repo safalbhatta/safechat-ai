@@ -6,6 +6,7 @@ const fs = require("fs");
 const {
   sendMessage,
   sendVoiceMessage,
+  sendImageMessage,
   getMessages,
   editMessage,
   deleteMessage,
@@ -22,6 +23,7 @@ const {
 } = require("../controllers/messageController");
 
 const { protect } = require("../middleware/authMiddleware");
+const chatImageUpload = require("../middleware/chatImageUpload");
 
 const router = express.Router();
 
@@ -55,6 +57,24 @@ const upload = multer({
 
 router.post("/", protect, sendMessage);
 router.post("/voice", protect, upload.single("audio"), sendVoiceMessage);
+router.post(
+  "/image",
+  protect,
+  (req, res, next) => {
+    chatImageUpload.single("image")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          message:
+            err.code === "LIMIT_FILE_SIZE"
+              ? "Image must be smaller than 10 MB"
+              : err.message,
+        });
+      }
+      next();
+    });
+  },
+  sendImageMessage
+);
 
 router.get("/flags/summary", protect, getFlaggedSummary);
 router.get("/flags/list", protect, getFlaggedMessages);

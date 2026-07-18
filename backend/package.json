@@ -15,10 +15,12 @@
     "cors": "^2.8.6",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "imagekit": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.2.0",
     "mongoose": "^8.15.0",
     "multer": "^2.2.0",
+    "resend": "^6.17.2",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
