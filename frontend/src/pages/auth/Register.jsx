@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Lock, User, MessageSquare } from "lucide-react";
+import { Mail, Lock, User, MessageSquare, Eye, EyeOff } from "lucide-react";
 import { motion } from "motion/react";
 import api from "../../lib/api.js";
 
@@ -16,6 +16,7 @@ export default function Register() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const updateField = (field, value) => {
     setFormData((prev) => ({
@@ -152,14 +153,22 @@ export default function Register() {
                 className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94a3b8]"
               />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 placeholder="Password"
                 value={formData.password}
                 onChange={(e) => updateField("password", e.target.value)}
                 required
                 minLength={6}
-                className="w-full h-12 pl-11 pr-4 rounded-2xl bg-white/80 border border-[#dfe7f4] text-[#101742] placeholder:text-[#94a3b8] outline-none focus:ring-2 focus:ring-[#6366F1]/25 focus:border-[#A5B4FC] transition-all"
+                className="w-full h-12 pl-11 pr-11 rounded-2xl bg-white/80 border border-[#dfe7f4] text-[#101742] placeholder:text-[#94a3b8] outline-none focus:ring-2 focus:ring-[#6366F1]/25 focus:border-[#A5B4FC] transition-all"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#6366F1] transition-colors"
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
 
             <div className="relative">
@@ -168,14 +177,22 @@ export default function Register() {
                 className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94a3b8]"
               />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 placeholder="Confirm password"
                 value={formData.confirmPassword}
                 onChange={(e) => updateField("confirmPassword", e.target.value)}
                 required
                 minLength={6}
-                className="w-full h-12 pl-11 pr-4 rounded-2xl bg-white/80 border border-[#dfe7f4] text-[#101742] placeholder:text-[#94a3b8] outline-none focus:ring-2 focus:ring-[#6366F1]/25 focus:border-[#A5B4FC] transition-all"
+                className="w-full h-12 pl-11 pr-11 rounded-2xl bg-white/80 border border-[#dfe7f4] text-[#101742] placeholder:text-[#94a3b8] outline-none focus:ring-2 focus:ring-[#6366F1]/25 focus:border-[#A5B4FC] transition-all"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#6366F1] transition-colors"
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
 
             <label className="flex items-start gap-2 text-sm cursor-pointer">
