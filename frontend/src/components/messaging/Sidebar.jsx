@@ -25,7 +25,7 @@ const navItems = [
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { notificationUnreadCount } = useSocket();
+  const { notificationUnreadCount, markAllNotificationsRead } = useSocket();
   const [user, setUser] = useState(JSON.parse(sessionStorage.getItem("user") || "{}"));
   
   useEffect(() => {
@@ -65,7 +65,17 @@ export default function Sidebar() {
           return (
             <button
               key={item.path}
-              onClick={() => navigate(item.path)}
+              onClick={async () => {
+                if (item.path === "/app/notifications") {
+                  try {
+                    await markAllNotificationsRead();
+                  } catch (error) {
+                    console.error("Failed to clear notification badge:", error);
+                  }
+                }
+
+                navigate(item.path);
+              }}
               title={item.label}
               className={`relative w-13 h-13 rounded-[20px] flex items-center justify-center ${
                 isActive
@@ -97,4 +107,3 @@ export default function Sidebar() {
     </aside>
   );
 }
-

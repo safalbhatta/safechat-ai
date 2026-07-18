@@ -22,6 +22,13 @@ export default function Messages() {
     setReloadKey((prev) => prev + 1);
   }, []);
 
+  const handleChatDeleted = useCallback(() => {
+    setSelectedChat(null);
+    setSelectedUser(null);
+    setShowConversationList(true);
+    setReloadKey((prev) => prev + 1);
+  }, []);
+
   const handleTypingUpdate = useCallback((data) => {
     setTypingChats((prev) => ({ ...prev, [data.chatId]: data.isTyping }));
   }, []);
@@ -59,6 +66,7 @@ export default function Messages() {
           chat={selectedChat}
           otherUser={selectedUser}
           onMessageSent={refreshChats}
+          onChatDeleted={handleChatDeleted}
           onlineUsers={onlineUsers}
           onTypingUpdate={handleTypingUpdate}
         />

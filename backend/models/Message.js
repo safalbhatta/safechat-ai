@@ -17,8 +17,16 @@ const messageSchema = new mongoose.Schema(
     receiverId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: false,
+      default: null,
     },
+
+    readBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
 
     messageType: {
       type: String,
@@ -117,6 +125,99 @@ const messageSchema = new mongoose.Schema(
     ref: "User",
   },
 ],
+
+
+    predictedCategory: {
+      type: String,
+      enum: [
+        "normal",
+        "spam",
+        "abusive",
+        "hateful",
+        "unclassified",
+      ],
+      default: "unclassified",
+      index: true,
+    },
+
+    classificationStatus: {
+      type: String,
+      enum: [
+        "classified",
+        "unclassified",
+        "error",
+      ],
+      default: "unclassified",
+      index: true,
+    },
+
+    classificationConfidence: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 1,
+    },
+
+    classificationProbabilities: {
+      normal: {
+        type: Number,
+        default: 0,
+      },
+      spam: {
+        type: Number,
+        default: 0,
+      },
+      abusive: {
+        type: Number,
+        default: 0,
+      },
+      hateful: {
+        type: Number,
+        default: 0,
+      },
+    },
+
+    modelVersion: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    modelName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    classificationLatencyMs: {
+      type: Number,
+      default: null,
+    },
+
+    classifiedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
+    classificationError: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    isSafetyHidden: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    revealedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
 
     isFlagged: {
       type: Boolean,

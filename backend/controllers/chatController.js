@@ -1,5 +1,11 @@
 const Chat = require("../models/Chat");
 const Message = require("../models/Message");
+const Notification = require("../models/Notification");
+const User = require("../models/User");
+const {
+  createNotification,
+  emitUnreadCount,
+} = require("../services/notificationService");
 
 const isSameId = (id1, id2) => {
   return id1?.toString() === id2?.toString();
@@ -7,6 +13,13 @@ const isSameId = (id1, id2) => {
 
 const isUserInArray = (array, userId) => {
   return array?.some((id) => isSameId(id, userId));
+};
+
+const isMutualFriend = (userA, userB) => {
+  return (
+    isUserInArray(userA?.friends, userB?._id) &&
+    isUserInArray(userB?.friends, userA?._id)
+  );
 };
 
 const uniqueIds = (ids = []) => {
@@ -35,11 +48,19 @@ const getClearDateForUser = (chat, userId) => {
 const getUnreadCount = async (chat, currentUserId) => {
   const clearedAt = getClearDateForUser(chat, currentUserId);
 
-  const unreadQuery = {
-    chatId: chat._id,
-    receiverId: currentUserId,
-    isViewed: false,
-  };
+  const unreadQuery = chat.isGroupChat
+    ? {
+        chatId: chat._id,
+        senderId: { $ne: currentUserId },
+        readBy: { $ne: currentUserId },
+        deletedFor: { $ne: currentUserId },
+      }
+    : {
+        chatId: chat._id,
+        receiverId: currentUserId,
+        isViewed: false,
+        deletedFor: { $ne: currentUserId },
+      };
 
   if (clearedAt) {
     unreadQuery.createdAt = { $gt: clearedAt };
@@ -49,19 +70,30 @@ const getUnreadCount = async (chat, currentUserId) => {
 };
 
 const formatChatForUser = async (chat, currentUserId) => {
-  const populatedChat = await Chat.findById(chat._id).populate(
-    "members",
-    "-password"
-  );
+  const populatedChat = await Chat.findById(chat._id)
+    .populate("members", "-password")
+    .populate("groupAdmin", "-password");
 
   if (!populatedChat) {
     return null;
   }
 
   const unreadCount = await getUnreadCount(populatedChat, currentUserId);
+  const requestStatus = populatedChat.isGroupChat
+    ? "accepted"
+    : populatedChat.requestStatus || "accepted";
+  const isMessageRequest = requestStatus === "pending";
 
   return {
     ...populatedChat.toObject(),
+    requestStatus,
+    isMessageRequest,
+    isIncomingMessageRequest:
+      isMessageRequest &&
+      isSameId(populatedChat.requestRecipient, currentUserId),
+    isOutgoingMessageRequest:
+      isMessageRequest &&
+      isSameId(populatedChat.initiatedBy, currentUserId),
     unreadCount,
     isPinned: isUserInArray(populatedChat.pinnedBy, currentUserId),
     isMuted: isUserInArray(populatedChat.mutedBy, currentUserId),
@@ -101,20 +133,50 @@ const createOrGetChat = async (req, res) => {
       return res.status(400).json({ message: "You cannot chat with yourself" });
     }
 
+    const [sender, receiver] = await Promise.all([
+      User.findById(senderId).select("friends blockedContacts"),
+      User.findById(receiverId).select("friends blockedContacts"),
+    ]);
+
+    if (!receiver) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (
+      isUserInArray(sender?.blockedContacts, receiverId) ||
+      isUserInArray(receiver?.blockedContacts, senderId)
+    ) {
+      return res.status(403).json({
+        message: "This conversation cannot be started because one user is blocked",
+      });
+    }
+
     let chat = await Chat.findOne({
       isGroupChat: false,
-      members: { $all: [senderId, receiverId] },
+      members: { $all: [senderId, receiverId], $size: 2 },
     }).populate("members", "-password");
 
     if (!chat) {
+      const friends = isMutualFriend(sender, receiver);
+
       chat = await Chat.create({
         members: [senderId, receiverId],
         isGroupChat: false,
+        requestStatus: friends ? "accepted" : "pending",
+        initiatedBy: friends ? null : senderId,
+        requestRecipient: friends ? null : receiverId,
+        requestMessageSent: false,
       });
     } else {
       chat.deletedFor = chat.deletedFor.filter(
         (userId) => !isSameId(userId, senderId)
       );
+
+      // Keep old direct chats working. Only newly created non-friend chats
+      // use the pending request flow.
+      if (!chat.requestStatus) {
+        chat.requestStatus = "accepted";
+      }
 
       await chat.save();
     }
@@ -157,6 +219,35 @@ const createGroupChat = async (req, res) => {
     });
 
     const formattedChat = await formatChatForUser(chat, currentUserId);
+    const io = req.app.get("io");
+    const creatorName =
+      req.user.name || req.user.username || req.user.email || "Someone";
+
+    for (const memberId of members) {
+      if (isSameId(memberId, currentUserId)) continue;
+
+      await createNotification({
+        io,
+        recipientId: memberId,
+        actorId: currentUserId,
+        type: "system",
+        title: groupName.trim(),
+        body: `${creatorName} added you to this group`,
+        chatId: chat._id,
+        metadata: {
+          action: "added_to_group",
+          isGroupChat: true,
+          groupName: groupName.trim(),
+        },
+      });
+
+      if (io) {
+        io.to(memberId.toString()).emit("chat:changed", {
+          chatId: chat._id.toString(),
+          action: "group-created",
+        });
+      }
+    }
 
     res.status(201).json(formattedChat);
   } catch (error) {
@@ -175,12 +266,39 @@ const getMyChats = async (req, res) => {
       .populate("members", "-password")
       .sort({ updatedAt: -1 });
 
+    const visibleChats = chats.filter((chat) => {
+      if (chat.isGroupChat || (chat.requestStatus || "accepted") !== "pending") {
+        return true;
+      }
+
+      if (isSameId(chat.initiatedBy, currentUserId)) {
+        return true;
+      }
+
+      return (
+        isSameId(chat.requestRecipient, currentUserId) &&
+        Boolean(chat.requestMessageSent)
+      );
+    });
+
     const chatsWithUnread = await Promise.all(
-      chats.map(async (chat) => {
+      visibleChats.map(async (chat) => {
         const unreadCount = await getUnreadCount(chat, currentUserId);
+        const requestStatus = chat.isGroupChat
+          ? "accepted"
+          : chat.requestStatus || "accepted";
+        const isMessageRequest = requestStatus === "pending";
 
         return {
           ...chat.toObject(),
+          requestStatus,
+          isMessageRequest,
+          isIncomingMessageRequest:
+            isMessageRequest &&
+            isSameId(chat.requestRecipient, currentUserId),
+          isOutgoingMessageRequest:
+            isMessageRequest &&
+            isSameId(chat.initiatedBy, currentUserId),
           unreadCount,
           isPinned: isUserInArray(chat.pinnedBy, currentUserId),
           isMuted: isUserInArray(chat.mutedBy, currentUserId),
@@ -544,6 +662,109 @@ const exitGroupChat = async (req, res) => {
   }
 };
 
+const acceptMessageRequest = async (req, res) => {
+  try {
+    const chat = await getChatAndCheckMember(req.params.chatId, req.user._id);
+
+    if (chat === null) {
+      return res.status(404).json({ message: "Message request not found" });
+    }
+
+    if (chat === false) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    if (chat.isGroupChat || (chat.requestStatus || "accepted") !== "pending") {
+      return res.status(400).json({ message: "This chat is not a pending message request" });
+    }
+
+    if (!isSameId(chat.requestRecipient, req.user._id)) {
+      return res.status(403).json({
+        message: "Only the person who received the request can accept it",
+      });
+    }
+
+    if (!chat.requestMessageSent) {
+      return res.status(400).json({ message: "No message has been sent yet" });
+    }
+
+    chat.requestStatus = "accepted";
+    chat.requestAcceptedAt = new Date();
+    chat.deletedFor = [];
+    await chat.save();
+
+    const updatedChat = await formatChatForUser(chat, req.user._id);
+    const io = req.app.get("io");
+
+    for (const memberId of chat.members || []) {
+      if (io) {
+        io.to(memberId.toString()).emit("chat:changed", {
+          chatId: chat._id.toString(),
+          action: "message-request-accepted",
+        });
+      }
+    }
+
+    res.json(updatedChat);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const deleteMessageRequest = async (req, res) => {
+  try {
+    const chat = await getChatAndCheckMember(req.params.chatId, req.user._id);
+
+    if (chat === null) {
+      return res.status(404).json({ message: "Message request not found" });
+    }
+
+    if (chat === false) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    if (chat.isGroupChat || (chat.requestStatus || "accepted") !== "pending") {
+      return res.status(400).json({ message: "This chat is not a pending message request" });
+    }
+
+    const canDelete =
+      isSameId(chat.requestRecipient, req.user._id) ||
+      isSameId(chat.initiatedBy, req.user._id);
+
+    if (!canDelete) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    const chatId = chat._id;
+    const memberIds = [...(chat.members || [])];
+
+    await Promise.all([
+      Message.deleteMany({ chatId }),
+      Notification.deleteMany({ chatId }),
+      Chat.deleteOne({ _id: chatId }),
+    ]);
+
+    const io = req.app.get("io");
+
+    for (const memberId of memberIds) {
+      if (io) {
+        io.to(memberId.toString()).emit("chat:changed", {
+          chatId: chatId.toString(),
+          action: "message-request-deleted",
+        });
+        await emitUnreadCount(io, memberId);
+      }
+    }
+
+    res.json({
+      message: "Message request deleted",
+      chatId,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   createOrGetChat,
   createGroupChat,
@@ -559,4 +780,6 @@ module.exports = {
   clearChat,
   deleteChatForMe,
   exitGroupChat,
+  acceptMessageRequest,
+  deleteMessageRequest,
 };

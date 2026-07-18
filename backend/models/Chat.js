@@ -36,6 +36,42 @@ const chatSchema = new mongoose.Schema(
       default: "",
     },
 
+    // Direct chats created between people who are not friends start as
+    // message requests. Existing chats and group chats remain accepted.
+    requestStatus: {
+      type: String,
+      enum: ["accepted", "pending"],
+      default: "accepted",
+      index: true,
+    },
+
+    initiatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    requestRecipient: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    requestMessageSent: {
+      type: Boolean,
+      default: false,
+    },
+
+    requestSentAt: {
+      type: Date,
+      default: null,
+    },
+
+    requestAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+
     pinnedBy: [
       {
         type: mongoose.Schema.Types.ObjectId,

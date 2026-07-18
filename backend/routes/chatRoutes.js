@@ -15,6 +15,8 @@ const {
   clearChat,
   deleteChatForMe,
   exitGroupChat,
+  acceptMessageRequest,
+  deleteMessageRequest,
 } = require("../controllers/chatController");
 
 const { protect } = require("../middleware/authMiddleware");
@@ -36,5 +38,15 @@ router.patch("/:chatId/unarchive", protect, unarchiveChat);
 router.patch("/:chatId/clear", protect, clearChat);
 router.patch("/:chatId/delete-for-me", protect, deleteChatForMe);
 router.patch("/:chatId/exit-group", protect, exitGroupChat);
+router.patch(
+  "/:chatId/message-request/accept",
+  protect,
+  acceptMessageRequest
+);
+router.delete(
+  "/:chatId/message-request",
+  protect,
+  deleteMessageRequest
+);
 
 module.exports = router;

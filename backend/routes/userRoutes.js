@@ -13,11 +13,28 @@ const {
   revokeSession, 
   toggleBlockUser,
   removeFriend,
-  getSuggestions
+  getSuggestions,
+  uploadProfilePicture
 } = require("../controllers/userController");
 const { protect } = require("../middleware/authMiddleware");
+const profilePictureUpload = require("../middleware/profilePictureUpload");
 
 const router = express.Router();
+
+const uploadProfilePictureFile = (req, res, next) => {
+  profilePictureUpload.single("profilePic")(req, res, (error) => {
+    if (error) {
+      return res.status(400).json({
+        message:
+          error.code === "LIMIT_FILE_SIZE"
+            ? "Profile picture must be smaller than 5 MB"
+            : error.message,
+      });
+    }
+
+    next();
+  });
+};
 
 router.get("/", protect, getUsers);
 router.get("/search", protect, searchUsers);
@@ -29,6 +46,12 @@ router.post("/request/decline", protect, declineFriendRequest);
 
 router.get("/profile", protect, getUserProfile);
 router.put("/profile", protect, updateUserProfile);
+router.post(
+  "/profile-picture",
+  protect,
+  uploadProfilePictureFile,
+  uploadProfilePicture
+);
 router.delete("/profile", protect, deleteUserProfile);
 router.post("/toggle-block/:userId", protect, toggleBlockUser);
 router.post("/remove-friend", protect, removeFriend);

@@ -45,6 +45,25 @@ const trimPreview = (value = "", maxLength = 140) => {
 const getActorName = (actor) =>
   actor?.name || actor?.username || actor?.email || "Someone";
 
+const getSafetyNotificationBody = (
+  message
+) => {
+  if (!message?.isSafetyHidden) {
+    return null;
+  }
+
+  switch (message.predictedCategory) {
+    case "spam":
+      return "Possible spam message hidden for your safety";
+    case "abusive":
+      return "Potentially abusive message hidden for your safety";
+    case "hateful":
+      return "Potential hateful content hidden for your safety";
+    default:
+      return "A message was hidden for your safety";
+  }
+};
+
 const canCreateNotification = async ({ recipientId, type }) => {
   const user = await User.findById(recipientId).select("notificationPreferences");
   if (!user) return false;
@@ -62,7 +81,10 @@ const populateNotification = (query) =>
   query
     .populate("actorId", "name username email profilePic")
     .populate("chatId", "members isGroupChat groupName groupAvatar")
-    .populate("messageId", "text messageType isDeleted chatId senderId");
+    .populate(
+      "messageId",
+      "text messageType isDeleted chatId senderId predictedCategory isSafetyHidden classificationConfidence"
+    );
 
 const getUnreadCount = (recipientId) =>
   Notification.countDocuments({ recipientId, isRead: false });
@@ -93,11 +115,16 @@ const createNotification = async ({
   chatId = null,
   messageId = null,
   metadata = {},
+  suppressWhenViewing = true,
 }) => {
   try {
     if (!recipientId || !type || !title) return null;
 
-    if (type === "message" && isRecipientViewingChat(io, recipientId, chatId)) {
+    if (
+      suppressWhenViewing &&
+      type === "message" &&
+      isRecipientViewingChat(io, recipientId, chatId)
+    ) {
       return null;
     }
 
@@ -136,16 +163,24 @@ const createMessageNotifications = async ({ io, chat, sender, message }) => {
 
   const senderId = sender._id || sender;
   const senderName = getActorName(sender);
-  const preview =
-    message.messageType === "voice"
-      ? "Voice message"
-      : message.isDeleted
-      ? "This message was deleted"
-      : trimPreview(message.text || "Sent a message");
+  const safetyBody =
+    getSafetyNotificationBody(message);
 
-  const recipients = (chat.members || []).filter(
-    (memberId) => memberId?.toString() !== senderId?.toString()
-  );
+  const preview = safetyBody
+    ? safetyBody
+    : message.messageType === "voice"
+    ? "Voice message"
+    : message.isDeleted
+    ? "This message was deleted"
+    : trimPreview(
+        message.text || "Sent a message"
+      );
+
+  const recipients = (chat.members || [])
+    .map((member) => member?._id || member)
+    .filter(
+      (memberId) => memberId?.toString() !== senderId?.toString()
+    );
 
   const results = await Promise.all(
     recipients.map(async (recipientId) => {
@@ -154,8 +189,14 @@ const createMessageNotifications = async ({ io, chat, sender, message }) => {
       );
       if (isMuted) return null;
 
+      const isMessageRequest =
+        !chat.isGroupChat &&
+        (chat.requestStatus || "accepted") === "pending";
+
       const title = chat.isGroupChat
         ? `${senderName} in ${chat.groupName || "Group chat"}`
+        : isMessageRequest
+        ? `${senderName} sent you a message request`
         : senderName;
 
       return createNotification({
@@ -171,7 +212,11 @@ const createMessageNotifications = async ({ io, chat, sender, message }) => {
           isGroupChat: Boolean(chat.isGroupChat),
           groupName: chat.groupName || "",
           messageType: message.messageType || "text",
+          isMessageRequest,
         },
+        // Group members expect an Activity Center item even when the
+        // conversation is open. Direct chats keep the quieter behavior.
+        suppressWhenViewing: !chat.isGroupChat,
       });
     })
   );
@@ -206,11 +251,18 @@ const updateMessageNotificationPreview = async ({ io, message }) => {
   try {
     if (!message?._id) return;
 
-    const body = message.isDeleted
+    const safetyBody =
+      getSafetyNotificationBody(message);
+
+    const body = safetyBody
+      ? safetyBody
+      : message.isDeleted
       ? "This message was deleted"
       : message.messageType === "voice"
       ? "Voice message"
-      : trimPreview(message.text || "Sent a message");
+      : trimPreview(
+          message.text || "Sent a message"
+        );
 
     const notifications = await Notification.find({
       messageId: message._id,

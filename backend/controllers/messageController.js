@@ -1,6 +1,7 @@
 const Message = require("../models/Message");
 const Chat = require("../models/Chat");
 const User = require("../models/User");
+const { classifyText } = require("../services/mlService");
 const {
   createMessageNotifications,
   createReactionNotification,
@@ -17,24 +18,114 @@ const isUserInList = (list = [], userId) => {
 
 const getMessageWithReply = async (messageId) => {
   return Message.findById(messageId)
+    .populate("senderId", "name username email profilePic")
+    .populate("receiverId", "name username email profilePic")
+    .populate("readBy", "name username email profilePic")
     .populate({
       path: "replyTo",
-      select: "text senderId isDeleted messageType audioUrl audioDuration",
+      select:
+        "text senderId receiverId isDeleted messageType audioUrl audioDuration predictedCategory isSafetyHidden revealedBy classificationConfidence",
+      populate: {
+        path: "senderId",
+        select: "name username email profilePic",
+      },
     })
-    .populate("reactions.userId", "username email");
+    .populate("reactions.userId", "name username email profilePic");
+};
+
+const SAFETY_LABELS = new Set([
+  "spam",
+  "abusive",
+  "hateful",
+]);
+
+const getSafetyCategoryTitle = (category) => {
+  switch (category) {
+    case "spam":
+      return "Possible spam message";
+    case "abusive":
+      return "Potentially abusive message";
+    case "hateful":
+      return "Potential hateful content";
+    default:
+      return "Safety-hidden message";
+  }
 };
 
 const getMessagePreview = (message) => {
   if (!message) return "";
 
-  if (message.isDeleted) return "This message was deleted";
+  if (message.isDeleted) {
+    return "This message was deleted";
+  }
 
-  if (message.messageType === "voice") return "🎤 Voice message";
+  if (message.messageType === "voice") {
+    return "Voice message";
+  }
 
-  if (message.isForwarded && message.text) return message.text;
+  if (
+    message.isSafetyHidden &&
+    SAFETY_LABELS.has(
+      message.predictedCategory
+    )
+  ) {
+    return getSafetyCategoryTitle(
+      message.predictedCategory
+    );
+  }
+
+  if (
+    message.isForwarded &&
+    message.text
+  ) {
+    return message.text;
+  }
 
   return message.text || "";
 };
+
+const getClassificationFields = async (
+  text
+) => classifyText(text);
+
+const copyClassificationFields = (
+  source = {}
+) => ({
+  predictedCategory:
+    source.predictedCategory ||
+    "unclassified",
+  classificationStatus:
+    source.classificationStatus ||
+    "unclassified",
+  classificationConfidence:
+    source.classificationConfidence ?? null,
+  classificationProbabilities: {
+    normal:
+      source.classificationProbabilities
+        ?.normal || 0,
+    spam:
+      source.classificationProbabilities
+        ?.spam || 0,
+    abusive:
+      source.classificationProbabilities
+        ?.abusive || 0,
+    hateful:
+      source.classificationProbabilities
+        ?.hateful || 0,
+  },
+  modelVersion:
+    source.modelVersion || "",
+  modelName:
+    source.modelName || "",
+  classificationLatencyMs:
+    source.classificationLatencyMs ?? null,
+  classifiedAt:
+    source.classifiedAt || null,
+  classificationError:
+    source.classificationError || "",
+  isSafetyHidden:
+    Boolean(source.isSafetyHidden),
+});
 
 const updateChatLastMessage = async (chatId) => {
   const latestMessage = await Message.findOne({ chatId }).sort({
@@ -67,20 +158,90 @@ const getChatAndCheckMember = async (chatId, userId) => {
   return chat;
 };
 
-const checkMessageAccess = (message, userId) => {
-  if (!message) return false;
+const checkMessageAccess = async (message, userId) => {
+  if (!message || !userId) return false;
 
-  const isSender = isSameId(message.senderId, userId);
-  const isReceiver = isSameId(message.receiverId, userId);
+  if (
+    isSameId(message.senderId?._id || message.senderId, userId) ||
+    isSameId(message.receiverId?._id || message.receiverId, userId)
+  ) {
+    return true;
+  }
 
-  return isSender || isReceiver;
+  const chatId = message.chatId?._id || message.chatId;
+  if (!chatId) return false;
+
+  const chat = await Chat.findById(chatId).select("members");
+  return Boolean(
+    chat?.members?.some((memberId) => isSameId(memberId, userId))
+  );
+};
+
+const getRecipientIds = (chat, senderId) => {
+  return (chat?.members || []).filter(
+    (memberId) => !isSameId(memberId, senderId)
+  );
+};
+
+const markMessagesReadForUser = async ({
+  chat,
+  currentUserId,
+  messageQuery,
+}) => {
+  await Message.updateMany(
+    {
+      ...messageQuery,
+      senderId: { $ne: currentUserId },
+      readBy: { $ne: currentUserId },
+    },
+    {
+      $addToSet: {
+        readBy: currentUserId,
+      },
+    }
+  );
+
+  const unreadCandidates = await Message.find({
+    ...messageQuery,
+    senderId: { $ne: currentUserId },
+    isViewed: false,
+  }).select("_id senderId readBy");
+
+  const memberIds = (chat.members || []).map((memberId) =>
+    memberId.toString()
+  );
+
+  const viewedMessageIds = unreadCandidates
+    .filter((message) => {
+      const senderId = (message.senderId?._id || message.senderId)?.toString();
+      const requiredReaders = memberIds.filter(
+        (memberId) => memberId !== senderId
+      );
+      const readByIds = new Set(
+        (message.readBy || []).map((readerId) =>
+          (readerId?._id || readerId).toString()
+        )
+      );
+
+      return requiredReaders.every((readerId) => readByIds.has(readerId));
+    })
+    .map((message) => message._id);
+
+  if (viewedMessageIds.length > 0) {
+    await Message.updateMany(
+      { _id: { $in: viewedMessageIds } },
+      { $set: { isViewed: true } }
+    );
+  }
+
+  return viewedMessageIds;
 };
 
 const sendMessage = async (req, res) => {
   try {
     const { chatId, receiverId, text, replyTo } = req.body;
 
-    if (!chatId || !receiverId || !text || !text.trim()) {
+    if (!chatId || !text || !text.trim()) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
@@ -94,44 +255,109 @@ const sendMessage = async (req, res) => {
       return res.status(403).json({ message: "Not allowed" });
     }
 
-    const receiverInChat = chat.members.some((memberId) =>
-      isSameId(memberId, receiverId)
-    );
+    let directReceiverId = null;
+    let isInitialMessageRequest = false;
 
-    if (!receiverInChat) {
-      return res.status(400).json({ message: "Receiver is not in this chat" });
+    if (!chat.isGroupChat) {
+      if (!receiverId) {
+        return res.status(400).json({ message: "Receiver is required" });
+      }
+
+      const receiverInChat = chat.members.some((memberId) =>
+        isSameId(memberId, receiverId)
+      );
+
+      if (!receiverInChat || isSameId(receiverId, req.user._id)) {
+        return res
+          .status(400)
+          .json({ message: "Receiver is not in this chat" });
+      }
+
+      directReceiverId = receiverId;
+
+      const currentUser = await User.findById(req.user._id);
+      const receiverUser = await User.findById(directReceiverId);
+
+      if (
+        currentUser?.blockedContacts?.some((id) =>
+          isSameId(id, directReceiverId)
+        )
+      ) {
+        return res.status(403).json({ message: "You have blocked this user" });
+      }
+
+      if (
+        receiverUser?.blockedContacts?.some((id) =>
+          isSameId(id, req.user._id)
+        )
+      ) {
+        return res.status(403).json({
+          message: "You cannot send messages to this user",
+        });
+      }
+
+      if ((chat.requestStatus || "accepted") === "pending") {
+        if (!isSameId(chat.initiatedBy, req.user._id)) {
+          return res.status(403).json({
+            message:
+              "Accept this message request before replying to the conversation",
+          });
+        }
+
+        if (!isSameId(chat.requestRecipient, directReceiverId)) {
+          return res.status(400).json({
+            message: "Message request recipient does not match this chat",
+          });
+        }
+
+        const alreadySent =
+          chat.requestMessageSent ||
+          Boolean(await Message.exists({ chatId: chat._id }));
+
+        if (alreadySent) {
+          return res.status(403).json({
+            message:
+              "Your message request is waiting for the other person to accept it",
+          });
+        }
+
+        if (replyTo) {
+          return res.status(400).json({
+            message: "The first message request cannot be a reply",
+          });
+        }
+
+        isInitialMessageRequest = true;
+      }
     }
-
-    const currentUser = await User.findById(req.user._id);
-    const receiverUser = await User.findById(receiverId);
-
-    if (currentUser?.blockedContacts?.some(id => isSameId(id, receiverId))) {
-      return res.status(403).json({ message: "You have blocked this user" });
-    }
-
-    if (receiverUser?.blockedContacts?.some(id => isSameId(id, req.user._id))) {
-      return res.status(403).json({ message: "You cannot send messages to this user" });
-    }
-
-    let replyMessage = null;
 
     if (replyTo) {
-      replyMessage = await Message.findById(replyTo);
+      const replyMessage = await Message.findById(replyTo);
 
-      if (!replyMessage || !checkMessageAccess(replyMessage, req.user._id)) {
+      if (
+        !replyMessage ||
+        !isSameId(replyMessage.chatId, chatId) ||
+        !(await checkMessageAccess(replyMessage, req.user._id))
+      ) {
         return res.status(400).json({ message: "Invalid reply message" });
       }
     }
 
     const cleanText = text.trim();
+    const classification = await getClassificationFields(
+      cleanText
+    );
 
     const message = await Message.create({
       chatId,
       senderId: req.user._id,
-      receiverId,
+      receiverId: chat.isGroupChat ? null : directReceiverId,
+      readBy: [req.user._id],
       messageType: "text",
       text: cleanText,
       replyTo: replyTo || null,
+      ...classification,
+      revealedBy: [],
       isViewed: false,
       isEdited: false,
       isDeleted: false,
@@ -141,23 +367,48 @@ const sendMessage = async (req, res) => {
       flagStatus: "None",
     });
 
+    const allMemberIds = (chat.members || []).map((memberId) => memberId);
+    const chatUpdate = {
+      lastMessage: getMessagePreview({
+        text: cleanText,
+        messageType: "text",
+        ...classification,
+      }),
+    };
+
+    if (isInitialMessageRequest) {
+      chatUpdate.requestMessageSent = true;
+      chatUpdate.requestSentAt = new Date();
+      chat.requestMessageSent = true;
+      chat.requestSentAt = chatUpdate.requestSentAt;
+    }
+
     await Chat.findByIdAndUpdate(chatId, {
-      $set: {
-        lastMessage: cleanText,
-      },
+      $set: chatUpdate,
       $pull: {
-        deletedFor: { $in: [req.user._id, receiverId] },
+        deletedFor: { $in: allMemberIds },
       },
     });
 
     const populatedMessage = await getMessageWithReply(message._id);
 
+    const io = req.app.get("io");
+
     await createMessageNotifications({
-      io: req.app.get("io"),
+      io,
       chat,
       sender: req.user,
       message: populatedMessage,
     });
+
+    if (isInitialMessageRequest && io) {
+      for (const memberId of chat.members || []) {
+        io.to(memberId.toString()).emit("chat:changed", {
+          chatId: chat._id.toString(),
+          action: "message-request-received",
+        });
+      }
+    }
 
     res.status(201).json(populatedMessage);
   } catch (error) {
@@ -169,8 +420,10 @@ const sendVoiceMessage = async (req, res) => {
   try {
     const { chatId, receiverId, audioDuration } = req.body;
 
-    if (!chatId || !receiverId || !req.file) {
-      return res.status(400).json({ message: "Missing voice message fields" });
+    if (!chatId || !req.file) {
+      return res
+        .status(400)
+        .json({ message: "Missing voice message fields" });
     }
 
     const chat = await getChatAndCheckMember(chatId, req.user._id);
@@ -183,23 +436,52 @@ const sendVoiceMessage = async (req, res) => {
       return res.status(403).json({ message: "Not allowed" });
     }
 
-    const receiverInChat = chat.members.some((memberId) =>
-      isSameId(memberId, receiverId)
-    );
+    let directReceiverId = null;
 
-    if (!receiverInChat) {
-      return res.status(400).json({ message: "Receiver is not in this chat" });
-    }
+    if (!chat.isGroupChat) {
+      if (!receiverId) {
+        return res.status(400).json({ message: "Receiver is required" });
+      }
 
-    const currentUser = await User.findById(req.user._id);
-    const receiverUser = await User.findById(receiverId);
+      const receiverInChat = chat.members.some((memberId) =>
+        isSameId(memberId, receiverId)
+      );
 
-    if (currentUser?.blockedContacts?.some(id => isSameId(id, receiverId))) {
-      return res.status(403).json({ message: "You have blocked this user" });
-    }
+      if (!receiverInChat || isSameId(receiverId, req.user._id)) {
+        return res
+          .status(400)
+          .json({ message: "Receiver is not in this chat" });
+      }
 
-    if (receiverUser?.blockedContacts?.some(id => isSameId(id, req.user._id))) {
-      return res.status(403).json({ message: "You cannot send messages to this user" });
+      directReceiverId = receiverId;
+
+      const currentUser = await User.findById(req.user._id);
+      const receiverUser = await User.findById(directReceiverId);
+
+      if (
+        currentUser?.blockedContacts?.some((id) =>
+          isSameId(id, directReceiverId)
+        )
+      ) {
+        return res.status(403).json({ message: "You have blocked this user" });
+      }
+
+      if (
+        receiverUser?.blockedContacts?.some((id) =>
+          isSameId(id, req.user._id)
+        )
+      ) {
+        return res.status(403).json({
+          message: "You cannot send messages to this user",
+        });
+      }
+
+      if ((chat.requestStatus || "accepted") === "pending") {
+        return res.status(403).json({
+          message:
+            "Send one text message request first. Voice messages are available after it is accepted",
+        });
+      }
     }
 
     const audioUrl = `${req.protocol}://${req.get("host")}/uploads/voices/${
@@ -209,7 +491,8 @@ const sendVoiceMessage = async (req, res) => {
     const message = await Message.create({
       chatId,
       senderId: req.user._id,
-      receiverId,
+      receiverId: chat.isGroupChat ? null : directReceiverId,
+      readBy: [req.user._id],
       messageType: "voice",
       text: "",
       audioUrl,
@@ -223,12 +506,14 @@ const sendVoiceMessage = async (req, res) => {
       flagStatus: "None",
     });
 
+    const allMemberIds = (chat.members || []).map((memberId) => memberId);
+
     await Chat.findByIdAndUpdate(chatId, {
       $set: {
-        lastMessage: "🎤 Voice message",
+        lastMessage: "Voice message",
       },
       $pull: {
-        deletedFor: { $in: [req.user._id, receiverId] },
+        deletedFor: { $in: allMemberIds },
       },
     });
 
@@ -267,9 +552,9 @@ const getMessages = async (req, res) => {
     );
 
     const messageQuery = {
-  chatId,
-  deletedFor: { $ne: currentUserId },
-};
+      chatId,
+      deletedFor: { $ne: currentUserId },
+    };
 
     if (clearedEntry?.clearedAt) {
       messageQuery.createdAt = {
@@ -277,26 +562,42 @@ const getMessages = async (req, res) => {
       };
     }
 
-    await Message.updateMany(
-      {
-        ...messageQuery,
-        receiverId: currentUserId,
-        isViewed: false,
-      },
-      {
-        isViewed: true,
-      }
-    );
+    const viewedMessageIds = await markMessagesReadForUser({
+      chat,
+      currentUserId,
+      messageQuery,
+    });
 
     const messages = await Message.find(messageQuery)
+      .populate("senderId", "name username email profilePic")
+      .populate("receiverId", "name username email profilePic")
+      .populate("readBy", "name username email profilePic")
       .populate({
         path: "replyTo",
-        select: "text senderId isDeleted messageType audioUrl audioDuration",
+        select:
+          "text senderId receiverId isDeleted messageType audioUrl audioDuration predictedCategory isSafetyHidden revealedBy classificationConfidence",
+        populate: {
+          path: "senderId",
+          select: "name username email profilePic",
+        },
       })
-      .populate("reactions.userId", "username email")
+      .populate("reactions.userId", "name username email profilePic")
       .sort({
         createdAt: 1,
       });
+
+    const io = req.app.get("io");
+    if (io && viewedMessageIds.length > 0) {
+      for (const memberId of chat.members || []) {
+        if (isSameId(memberId, currentUserId)) continue;
+
+        io.to(memberId.toString()).emit("messagesSeen", {
+          chatId: chat._id.toString(),
+          readerId: currentUserId.toString(),
+          viewedMessageIds: viewedMessageIds.map((id) => id.toString()),
+        });
+      }
+    }
 
     res.json(messages);
   } catch (error) {
@@ -337,9 +638,36 @@ const editMessage = async (req, res) => {
       });
     }
 
-    message.text = text.trim();
+    const cleanText = text.trim();
+    const classification =
+      await getClassificationFields(
+        cleanText
+      );
+
+    message.text = cleanText;
     message.isEdited = true;
     message.editedAt = new Date();
+    message.predictedCategory =
+      classification.predictedCategory;
+    message.classificationStatus =
+      classification.classificationStatus;
+    message.classificationConfidence =
+      classification.classificationConfidence;
+    message.classificationProbabilities =
+      classification.classificationProbabilities;
+    message.modelVersion =
+      classification.modelVersion;
+    message.modelName =
+      classification.modelName;
+    message.classificationLatencyMs =
+      classification.classificationLatencyMs;
+    message.classifiedAt =
+      classification.classifiedAt;
+    message.classificationError =
+      classification.classificationError;
+    message.isSafetyHidden =
+      classification.isSafetyHidden;
+    message.revealedBy = [];
 
     await message.save();
     await updateChatLastMessage(message.chatId);
@@ -388,6 +716,8 @@ const deleteMessage = async (req, res) => {
     message.flagReason = "";
     message.flagStatus = "None";
     message.reactions = [];
+    message.isSafetyHidden = false;
+    message.revealedBy = [];
 
     await message.save();
     await updateChatLastMessage(message.chatId);
@@ -410,7 +740,7 @@ const forwardMessage = async (req, res) => {
     const { messageId } = req.params;
     const { chatId, receiverId } = req.body;
 
-    if (!chatId || !receiverId) {
+    if (!chatId) {
       return res.status(400).json({ message: "Missing forward fields" });
     }
 
@@ -420,12 +750,14 @@ const forwardMessage = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (!checkMessageAccess(originalMessage, req.user._id)) {
+    if (!(await checkMessageAccess(originalMessage, req.user._id))) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
     if (originalMessage.isDeleted) {
-      return res.status(400).json({ message: "Deleted message cannot be forwarded" });
+      return res
+        .status(400)
+        .json({ message: "Deleted message cannot be forwarded" });
     }
 
     const targetChat = await getChatAndCheckMember(chatId, req.user._id);
@@ -438,24 +770,60 @@ const forwardMessage = async (req, res) => {
       return res.status(403).json({ message: "Not allowed in target chat" });
     }
 
-    const receiverInChat = targetChat.members.some((memberId) =>
-      isSameId(memberId, receiverId)
-    );
+    let directReceiverId = null;
 
-    if (!receiverInChat) {
-      return res.status(400).json({ message: "Receiver is not in target chat" });
+    if (!targetChat.isGroupChat) {
+      if (!receiverId) {
+        return res.status(400).json({ message: "Receiver is required" });
+      }
+
+      const receiverInChat = targetChat.members.some((memberId) =>
+        isSameId(memberId, receiverId)
+      );
+
+      if (!receiverInChat || isSameId(receiverId, req.user._id)) {
+        return res
+          .status(400)
+          .json({ message: "Receiver is not in target chat" });
+      }
+
+      directReceiverId = receiverId;
+
+      if ((targetChat.requestStatus || "accepted") === "pending") {
+        return res.status(403).json({
+          message:
+            "Messages cannot be forwarded until the message request is accepted",
+        });
+      }
     }
+
+    const classification =
+      originalMessage.messageType === "text" &&
+      originalMessage.classificationStatus ===
+        "classified"
+        ? copyClassificationFields(
+            originalMessage
+          )
+        : originalMessage.messageType ===
+          "text"
+        ? await getClassificationFields(
+            originalMessage.text || ""
+          )
+        : copyClassificationFields();
 
     const forwardedMessage = await Message.create({
       chatId,
       senderId: req.user._id,
-      receiverId,
+      receiverId: targetChat.isGroupChat ? null : directReceiverId,
+      readBy: [req.user._id],
       messageType: originalMessage.messageType,
       text: originalMessage.text || "",
       audioUrl: originalMessage.audioUrl || "",
       audioDuration: originalMessage.audioDuration || 0,
       isForwarded: true,
       forwardedFrom: originalMessage._id,
+      ...classification,
+      revealedBy: [],
       isViewed: false,
       isEdited: false,
       isDeleted: false,
@@ -465,15 +833,26 @@ const forwardMessage = async (req, res) => {
       flagStatus: "None",
     });
 
+    const allMemberIds = (targetChat.members || []).map(
+      (memberId) => memberId
+    );
+
     await Chat.findByIdAndUpdate(chatId, {
       $set: {
         lastMessage:
-          originalMessage.messageType === "voice"
-            ? "🎤 Voice message"
-            : originalMessage.text || "Forwarded message",
+          originalMessage.messageType ===
+          "voice"
+            ? "Voice message"
+            : getMessagePreview({
+                text:
+                  originalMessage.text ||
+                  "Forwarded message",
+                messageType: "text",
+                ...classification,
+              }),
       },
       $pull: {
-        deletedFor: { $in: [req.user._id, receiverId] },
+        deletedFor: { $in: allMemberIds },
       },
     });
 
@@ -502,7 +881,7 @@ const togglePinMessage = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (!checkMessageAccess(message, req.user._id)) {
+    if (!(await checkMessageAccess(message, req.user._id))) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
@@ -534,7 +913,7 @@ const toggleStarMessage = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (!checkMessageAccess(message, req.user._id)) {
+    if (!(await checkMessageAccess(message, req.user._id))) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
@@ -573,7 +952,7 @@ const reactToMessage = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (!checkMessageAccess(message, req.user._id)) {
+    if (!(await checkMessageAccess(message, req.user._id))) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
@@ -632,7 +1011,7 @@ const deleteMessageForMe = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (!checkMessageAccess(message, req.user._id)) {
+    if (!(await checkMessageAccess(message, req.user._id))) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
@@ -684,7 +1063,7 @@ const flagMessage = async (req, res) => {
       });
     }
 
-    if (!checkMessageAccess(message, req.user._id)) {
+    if (!(await checkMessageAccess(message, req.user._id))) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
@@ -705,19 +1084,82 @@ const flagMessage = async (req, res) => {
   }
 };
 
+const revealSafetyMessage = async (
+  req,
+  res
+) => {
+  try {
+    const { messageId } = req.params;
+    const message = await Message.findById(
+      messageId
+    );
+
+    if (!message) {
+      return res.status(404).json({
+        message: "Message not found",
+      });
+    }
+
+    if (
+      !(await checkMessageAccess(
+        message,
+        req.user._id
+      ))
+    ) {
+      return res.status(403).json({
+        message: "Not allowed",
+      });
+    }
+
+    if (
+      isSameId(
+        message.senderId,
+        req.user._id
+      )
+    ) {
+      return res.json(
+        await getMessageWithReply(
+          message._id
+        )
+      );
+    }
+
+    if (
+      !isUserInList(
+        message.revealedBy,
+        req.user._id
+      )
+    ) {
+      message.revealedBy.push(
+        req.user._id
+      );
+      await message.save();
+    }
+
+    const updatedMessage =
+      await getMessageWithReply(
+        message._id
+      );
+
+    res.json(updatedMessage);
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
 const getFlaggedSummary = async (req, res) => {
   try {
     const currentUserId = req.user._id;
 
+    const accessibleChatIds = await Chat.find({
+      members: currentUserId,
+    }).distinct("_id");
+
     const messages = await Message.find({
-      $and: [
-        {
-          $or: [{ senderId: currentUserId }, { receiverId: currentUserId }],
-        },
-        {
-          isFlagged: true,
-        },
-      ],
+      chatId: { $in: accessibleChatIds },
+      isFlagged: true,
     });
 
     const summary = {
@@ -753,19 +1195,18 @@ const getFlaggedMessages = async (req, res) => {
   try {
     const currentUserId = req.user._id;
 
+    const accessibleChatIds = await Chat.find({
+      members: currentUserId,
+    }).distinct("_id");
+
     const flaggedMessages = await Message.find({
-      $and: [
-        {
-          $or: [{ senderId: currentUserId }, { receiverId: currentUserId }],
-        },
-        {
-          isFlagged: true,
-        },
-      ],
+      chatId: { $in: accessibleChatIds },
+      isFlagged: true,
     })
-      .populate("senderId", "username email")
-      .populate("receiverId", "username email")
-      .populate("flaggedBy", "username email")
+      .populate("chatId", "isGroupChat groupName members")
+      .populate("senderId", "name username email profilePic")
+      .populate("receiverId", "name username email profilePic")
+      .populate("flaggedBy", "name username email profilePic")
       .sort({ flaggedAt: -1 })
       .limit(100);
 
@@ -792,7 +1233,7 @@ const updateFlagStatus = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (!checkMessageAccess(message, req.user._id)) {
+    if (!(await checkMessageAccess(message, req.user._id))) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
@@ -818,6 +1259,7 @@ module.exports = {
   togglePinMessage,
   toggleStarMessage,
   reactToMessage,
+  revealSafetyMessage,
   flagMessage,
   getFlaggedSummary,
   getFlaggedMessages,

@@ -10,6 +10,8 @@ const userRoutes = require("./routes/userRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const analyticsRoutes = require("./routes/analyticsRoutes");
+const Chat = require("./models/Chat");
 
 const app = express();
 
@@ -30,6 +32,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 const server = http.createServer(app);
 
@@ -46,75 +49,215 @@ const onlineUsers = new Map();
 const activeChats = new Map();
 io.activeChats = activeChats;
 
+const emitOnlineUsers = () => {
+  io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
+};
+
+const addOnlineSocket = (userId, socketId) => {
+  const key = userId.toString();
+  const sockets = onlineUsers.get(key) || new Set();
+  sockets.add(socketId);
+  onlineUsers.set(key, sockets);
+};
+
+const removeOnlineSocket = (userId, socketId) => {
+  if (!userId) return;
+
+  const key = userId.toString();
+  const sockets = onlineUsers.get(key);
+
+  if (!sockets) return;
+
+  sockets.delete(socketId);
+
+  if (sockets.size === 0) {
+    onlineUsers.delete(key);
+  } else {
+    onlineUsers.set(key, sockets);
+  }
+};
+
+const emitToChatMembers = async ({
+  chatId,
+  event,
+  payload,
+  excludeUserId = null,
+}) => {
+  if (!chatId) return;
+
+  const chat = await Chat.findById(chatId).select("members");
+  if (!chat) return;
+
+  for (const memberId of chat.members || []) {
+    if (
+      excludeUserId &&
+      memberId.toString() === excludeUserId.toString()
+    ) {
+      continue;
+    }
+
+    io.to(memberId.toString()).emit(event, payload);
+  }
+};
+
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
   socket.on("addUser", (userId) => {
-    socket.join(userId);
-    onlineUsers.set(userId, socket.id);
-    io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
-    console.log("Online users:", onlineUsers);
+    if (!userId) return;
+
+    if (socket.data.userId && socket.data.userId !== userId.toString()) {
+      removeOnlineSocket(socket.data.userId, socket.id);
+      socket.leave(socket.data.userId);
+    }
+
+    socket.data.userId = userId.toString();
+    socket.join(socket.data.userId);
+    addOnlineSocket(socket.data.userId, socket.id);
+    emitOnlineUsers();
   });
 
-  socket.on("activeChat", ({ userId, chatId }) => {
+  socket.on("activeChat", async ({ userId, chatId }) => {
     if (!userId || !chatId) return;
-    activeChats.set(socket.id, { userId: userId.toString(), chatId: chatId.toString() });
+    if (socket.data.userId && socket.data.userId !== userId.toString()) return;
+
+    const chat = await Chat.findOne({
+      _id: chatId,
+      members: userId,
+    }).select("_id");
+
+    if (!chat) return;
+
+    const previous = activeChats.get(socket.id);
+
+    if (previous?.chatId && previous.chatId !== chatId.toString()) {
+      socket.leave(`chat:${previous.chatId}`);
+    }
+
+    activeChats.set(socket.id, {
+      userId: userId.toString(),
+      chatId: chatId.toString(),
+    });
+
+    socket.join(`chat:${chatId}`);
   });
 
-  socket.on("leaveChat", () => {
+  socket.on("leaveChat", ({ chatId } = {}) => {
+    const current = activeChats.get(socket.id);
+    const roomChatId = chatId || current?.chatId;
+
+    if (roomChatId) {
+      socket.leave(`chat:${roomChatId}`);
+    }
+
     activeChats.delete(socket.id);
   });
 
-  socket.on("sendMessage", ({ receiverId, message }) => {
-    const receiverSocketId = onlineUsers.get(receiverId);
+  socket.on("sendMessage", async ({ chatId, message }) => {
+    try {
+      const resolvedChatId = chatId || message?.chatId?._id || message?.chatId;
+      const senderId =
+        socket.data.userId ||
+        message?.senderId?._id ||
+        message?.senderId;
 
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("receiveMessage", message);
+      if (!resolvedChatId || !senderId || !message) return;
+
+      const senderIsMember = await Chat.exists({
+        _id: resolvedChatId,
+        members: senderId,
+      });
+
+      if (!senderIsMember) return;
+
+      await emitToChatMembers({
+        chatId: resolvedChatId,
+        event: "receiveMessage",
+        payload: message,
+        excludeUserId: senderId,
+      });
+    } catch (error) {
+      console.error("Socket sendMessage failed:", error.message);
     }
   });
 
-  socket.on("messageUpdated", ({ receiverId, message }) => {
-    const receiverSocketId = onlineUsers.get(receiverId);
+  socket.on("messageUpdated", async ({ chatId, message }) => {
+    try {
+      const resolvedChatId = chatId || message?.chatId?._id || message?.chatId;
+      const actorId = socket.data.userId;
 
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("messageUpdated", message);
+      if (!resolvedChatId || !actorId || !message) return;
+
+      const actorIsMember = await Chat.exists({
+        _id: resolvedChatId,
+        members: actorId,
+      });
+
+      if (!actorIsMember) return;
+
+      await emitToChatMembers({
+        chatId: resolvedChatId,
+        event: "messageUpdated",
+        payload: message,
+        excludeUserId: actorId,
+      });
+    } catch (error) {
+      console.error("Socket messageUpdated failed:", error.message);
     }
   });
 
-  socket.on("messagesSeen", ({ receiverId, chatId }) => {
-    const receiverSocketId = onlineUsers.get(receiverId);
+  socket.on("messagesSeen", async ({ chatId, viewedMessageIds = [] }) => {
+    try {
+      const readerId = socket.data.userId;
+      if (!chatId || !readerId) return;
 
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("messagesSeen", { chatId });
+      await emitToChatMembers({
+        chatId,
+        event: "messagesSeen",
+        payload: {
+          chatId,
+          readerId,
+          viewedMessageIds,
+        },
+        excludeUserId: readerId,
+      });
+    } catch (error) {
+      console.error("Socket messagesSeen failed:", error.message);
     }
   });
 
-  socket.on("typing", ({ receiverId, senderId, senderName, chatId }) => {
-    const receiverSocketId = onlineUsers.get(receiverId);
+  socket.on("typing", ({ senderId, senderName, chatId }) => {
+    if (!chatId || !senderId) return;
+    if (socket.data.userId && socket.data.userId !== senderId.toString()) return;
 
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("typing", { senderId, senderName, chatId });
-    }
+    socket.to(`chat:${chatId}`).emit("typing", {
+      senderId,
+      senderName,
+      chatId,
+    });
   });
 
-  socket.on("stopTyping", ({ receiverId, senderId, chatId }) => {
-    const receiverSocketId = onlineUsers.get(receiverId);
+  socket.on("stopTyping", ({ senderId, chatId }) => {
+    if (!chatId || !senderId) return;
+    if (socket.data.userId && socket.data.userId !== senderId.toString()) return;
 
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("stopTyping", { senderId, chatId });
-    }
+    socket.to(`chat:${chatId}`).emit("stopTyping", {
+      senderId,
+      chatId,
+    });
   });
 
   socket.on("disconnect", () => {
-    activeChats.delete(socket.id);
-    for (const [userId, socketId] of onlineUsers.entries()) {
-      if (socketId === socket.id) {
-        onlineUsers.delete(userId);
-        break;
-      }
+    const active = activeChats.get(socket.id);
+
+    if (active?.chatId) {
+      socket.leave(`chat:${active.chatId}`);
     }
 
-    io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
+    activeChats.delete(socket.id);
+    removeOnlineSocket(socket.data.userId, socket.id);
+    emitOnlineUsers();
+
     console.log("Socket disconnected:", socket.id);
   });
 });

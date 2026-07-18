@@ -28,6 +28,9 @@ import {
   MinusCircle,
   ShieldCheck,
   UserMinus,
+  LogOut,
+  Eye,
+  ShieldAlert,
 } from "lucide-react";
 import api from "../../lib/api.js";
 
@@ -50,18 +53,36 @@ function getUserName(user) {
   return user?.name || user?.username || user?.email || "Unknown User";
 }
 
+function getValueId(value) {
+  return typeof value === "object" ? value?._id : value;
+}
+
+function idsMatch(id1, id2) {
+  return id1?.toString() === id2?.toString();
+}
+
 function Avatar({ user }) {
   return (
     <div className="relative shrink-0">
-      <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#6366F1] text-white flex items-center justify-center font-black shadow-[0_10px_24px_rgba(99,102,241,0.20)]">
-        {initials(getUserName(user))}
+      <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#6366F1] text-white flex items-center justify-center font-black shadow-[0_10px_24px_rgba(99,102,241,0.20)] overflow-hidden">
+        {user?.profilePic ? (
+          <img
+            src={user.profilePic}
+            alt={getUserName(user)}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          initials(getUserName(user))
+        )}
       </div>
 
-      <span
-        className={`absolute right-0 bottom-0 w-3 h-3 rounded-full border-2 border-white ${
-          user?.isOnline ? "bg-emerald-400" : "bg-slate-300"
-        }`}
-      />
+      {!user?.isGroup && (
+        <span
+          className={`absolute right-0 bottom-0 w-3 h-3 rounded-full border-2 border-white ${
+            user?.isOnline ? "bg-emerald-400" : "bg-slate-300"
+          }`}
+        />
+      )}
     </div>
   );
 }
@@ -70,6 +91,7 @@ export default function ChatArea({
   chat,
   otherUser,
   onMessageSent,
+  onChatDeleted,
   onlineUsers = [],
   onOnlineUsersUpdate,
   onTypingUpdate,
@@ -77,12 +99,19 @@ export default function ChatArea({
   const { socket: globalSocket } = useSocket();
   const currentUser = getCurrentUser();
   const currentUserId = currentUser?._id || currentUser?.id;
+  const isGroupChat = Boolean(chat?.isGroupChat || otherUser?.isGroup);
+  const directReceiverId = isGroupChat ? null : otherUser?._id;
+  const chatDisplayName = isGroupChat
+    ? chat?.groupName || otherUser?.name || "Group chat"
+    : getUserName(otherUser);
+  const chatMemberCount = chat?.members?.length || 0;
 
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isOtherTyping, setIsOtherTyping] = useState(false);
+  const [typingUserName, setTypingUserName] = useState("");
   const [activeMessageMenu, setActiveMessageMenu] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -93,11 +122,19 @@ export default function ChatArea({
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [forwardTarget, setForwardTarget] = useState(null);
   const [forwardUsers, setForwardUsers] = useState([]);
+  const [forwardGroups, setForwardGroups] = useState([]);
   const [forwardSearch, setForwardSearch] = useState("");
   const [forwardLoading, setForwardLoading] = useState(false);
  const [selectedMessageIds, setSelectedMessageIds] = useState([]);
 const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
 const [profilePanelOpen, setProfilePanelOpen] = useState(false);
+const [messageRequestStatus, setMessageRequestStatus] = useState(
+  chat?.requestStatus || "accepted"
+);
+const [requestMessageSent, setRequestMessageSent] = useState(
+  Boolean(chat?.requestMessageSent)
+);
+const [requestActionLoading, setRequestActionLoading] = useState(false);
 
   const messagesEndRef = useRef(null);
   const chatAreaRef = useRef(null);
@@ -109,6 +146,20 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const recordingTimerRef = useRef(null);
   const recordingStartedAtRef = useRef(null);
 
+  const requestInitiatorId = getValueId(chat?.initiatedBy);
+  const requestRecipientId = getValueId(chat?.requestRecipient);
+  const isPendingMessageRequest =
+    !isGroupChat && messageRequestStatus === "pending";
+  const isMessageRequestSender =
+    isPendingMessageRequest && idsMatch(requestInitiatorId, currentUserId);
+  const isMessageRequestRecipient =
+    isPendingMessageRequest && idsMatch(requestRecipientId, currentUserId);
+
+  useEffect(() => {
+    setMessageRequestStatus(chat?.requestStatus || "accepted");
+    setRequestMessageSent(Boolean(chat?.requestMessageSent));
+  }, [chat?._id, chat?.requestStatus, chat?.requestMessageSent]);
+
   const blockedContactsRef = useRef(currentUser?.blockedContacts || []);
   useEffect(() => {
     blockedContactsRef.current = currentUser?.blockedContacts || [];
@@ -117,6 +168,7 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   useEffect(() => {
     setIsTyping(false);
     setIsOtherTyping(false);
+    setTypingUserName("");
   }, [chat?._id]);
 
   useEffect(() => {
@@ -141,13 +193,22 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     socketRef.current = globalSocket;
 
     const handleReceiveMessage = (incomingMessage) => {
-      if (chat?._id && incomingMessage.chatId === chat._id) {
+      const incomingChatId =
+        incomingMessage.chatId?._id || incomingMessage.chatId;
+
+      if (chat?._id && incomingChatId?.toString() === chat._id.toString()) {
         api
           .get(`/messages/${chat._id}`)
+          .then((response) => {
+            setMessages(response.data || []);
+          })
           .catch((err) => console.log("Failed to mark as viewed", err));
+
         api
           .patch(`/notifications/chat/${chat._id}/read`)
-          .catch((err) => console.log("Failed to mark chat notifications as read", err));
+          .catch((err) =>
+            console.log("Failed to mark chat notifications as read", err)
+          );
       }
 
       setMessages((prev) => {
@@ -157,7 +218,10 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
         if (alreadyExists) return prev;
 
-        if (chat?._id && incomingMessage.chatId === chat._id) {
+        if (
+          chat?._id &&
+          incomingChatId?.toString() === chat._id.toString()
+        ) {
           return [...prev, incomingMessage];
         }
 
@@ -176,53 +240,112 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
       onMessageSent?.();
     };
 
+    const handleMessagesSeen = ({
+      chatId,
+      viewedMessageIds = [],
+    }) => {
+      if (chatId?.toString() !== chat?._id?.toString()) return;
+
+      const viewedIds = new Set(
+        viewedMessageIds.map((messageId) => messageId.toString())
+      );
+
+      if (viewedIds.size === 0) return;
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          viewedIds.has(msg._id?.toString())
+            ? { ...msg, isViewed: true }
+            : msg
+        )
+      );
+    };
+
     const handleTypingSocket = (data) => {
       const isSenderBlocked = blockedContactsRef.current.some(
-        (contact) => (contact._id || contact).toString() === data.senderId?.toString()
+        (contact) =>
+          (contact._id || contact).toString() ===
+          data.senderId?.toString()
       );
       if (isSenderBlocked) return;
 
       if (chat?._id && data.chatId === chat._id) {
         setIsOtherTyping(true);
+        setTypingUserName(data.senderName || "Someone");
       }
+
       onTypingUpdate?.({ chatId: data.chatId, isTyping: true });
     };
 
     const handleStopTypingSocket = (data) => {
       const isSenderBlocked = blockedContactsRef.current.some(
-        (contact) => (contact._id || contact).toString() === data.senderId?.toString()
+        (contact) =>
+          (contact._id || contact).toString() ===
+          data.senderId?.toString()
       );
       if (isSenderBlocked) return;
 
       if (chat?._id && data.chatId === chat._id) {
         setIsOtherTyping(false);
+        setTypingUserName("");
       }
+
       onTypingUpdate?.({ chatId: data.chatId, isTyping: false });
+    };
+
+    const handleChatChanged = ({ chatId, action } = {}) => {
+      if (!chat?._id || chatId?.toString() !== chat._id.toString()) return;
+
+      if (action === "message-request-accepted") {
+        setMessageRequestStatus("accepted");
+        setNotice("Message request accepted");
+        onMessageSent?.();
+      }
+
+      if (action === "message-request-deleted") {
+        onChatDeleted?.(chat._id);
+      }
+
+      if (action === "message-request-received") {
+        setRequestMessageSent(true);
+        onMessageSent?.();
+      }
     };
 
     globalSocket.on("receiveMessage", handleReceiveMessage);
     globalSocket.on("messageUpdated", handleMessageUpdated);
+    globalSocket.on("messagesSeen", handleMessagesSeen);
     globalSocket.on("typing", handleTypingSocket);
     globalSocket.on("stopTyping", handleStopTypingSocket);
+    globalSocket.on("chat:changed", handleChatChanged);
 
     return () => {
       globalSocket.off("receiveMessage", handleReceiveMessage);
       globalSocket.off("messageUpdated", handleMessageUpdated);
+      globalSocket.off("messagesSeen", handleMessagesSeen);
       globalSocket.off("typing", handleTypingSocket);
       globalSocket.off("stopTyping", handleStopTypingSocket);
+      globalSocket.off("chat:changed", handleChatChanged);
 
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
-        if (socketRef.current && chat?._id && otherUser?._id && currentUserId) {
+
+        if (socketRef.current && chat?._id && currentUserId) {
           socketRef.current.emit("stopTyping", {
-            receiverId: otherUser._id,
             senderId: currentUserId,
             chatId: chat._id,
           });
         }
       }
     };
-  }, [currentUserId, chat?._id, onMessageSent, onTypingUpdate, globalSocket, otherUser?._id]);
+  }, [
+    currentUserId,
+    chat?._id,
+    onMessageSent,
+    onChatDeleted,
+    onTypingUpdate,
+    globalSocket,
+  ]);
 
   useEffect(() => {
   const handleClickOutside = () => {
@@ -290,12 +413,93 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     return list.some((item) => isSameId(getId(item), currentUserId));
   };
 
+  const isSafetyMessageHiddenForMe = (
+    msg
+  ) => {
+    if (
+      !msg?.isSafetyHidden ||
+      msg?.isDeleted
+    ) {
+      return false;
+    }
+
+    const senderId = getId(
+      msg.senderId
+    );
+
+    if (
+      isSameId(
+        senderId,
+        currentUserId
+      )
+    ) {
+      return false;
+    }
+
+    return !isCurrentUserInList(
+      msg.revealedBy || []
+    );
+  };
+
+  const getSafetyMessageDetails = (
+    category
+  ) => {
+    switch (category) {
+      case "spam":
+        return {
+          title:
+            "Possible spam message detected",
+          description:
+            "This message has been hidden for your safety.",
+          reportCategory: "Spam",
+        };
+      case "abusive":
+        return {
+          title:
+            "Potentially abusive message detected",
+          description:
+            "This content may contain a personal attack.",
+          reportCategory:
+            "Harassment",
+        };
+      case "hateful":
+        return {
+          title:
+            "Potential hateful content detected",
+          description:
+            "This content may target a protected group.",
+          reportCategory:
+            "Hate Speech",
+        };
+      default:
+        return {
+          title:
+            "Safety warning",
+          description:
+            "This message was hidden by SafeChat AI.",
+          reportCategory: "Other",
+        };
+    }
+  };
+
   const getMessagePreview = (msg) => {
     if (!msg) return "";
 
-    if (msg.isDeleted) return "This message was deleted";
+    if (msg.isDeleted) {
+      return "This message was deleted";
+    }
 
-    if (msg.messageType === "voice") return "Voice message";
+    if (
+      isSafetyMessageHiddenForMe(msg)
+    ) {
+      return getSafetyMessageDetails(
+        msg.predictedCategory
+      ).title;
+    }
+
+    if (msg.messageType === "voice") {
+      return "Voice message";
+    }
 
     return msg.text || "";
   };
@@ -331,7 +535,25 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const handleSendMessage = async (e) => {
     e.preventDefault();
 
-    if (!message.trim() || !chat?._id || !otherUser?._id) return;
+    if (
+      !message.trim() ||
+      !chat?._id ||
+      (!isGroupChat && !directReceiverId)
+    ) {
+      return;
+    }
+
+    if (
+      isPendingMessageRequest &&
+      (!isMessageRequestSender || requestMessageSent)
+    ) {
+      setNotice(
+        isMessageRequestRecipient
+          ? "Accept this message request before replying"
+          : "Your message request is waiting for acceptance"
+      );
+      return;
+    }
 
     const text = message.trim();
     const replyToId = replyingTo?._id || null;
@@ -339,19 +561,23 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     setMessage("");
 
     try {
-      const res = await api.post("/messages", {
+      const payload = {
         chatId: chat._id,
-        receiverId: otherUser._id,
         text,
         replyTo: replyToId,
-      });
+      };
 
+      if (!isGroupChat) {
+        payload.receiverId = directReceiverId;
+      }
+
+      const res = await api.post("/messages", payload);
       const savedMessage = res.data;
 
       setMessages((prev) => [...prev, savedMessage]);
 
       socketRef.current?.emit("sendMessage", {
-        receiverId: otherUser._id,
+        chatId: chat._id,
         message: savedMessage,
       });
 
@@ -361,10 +587,13 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
       }
 
       socketRef.current?.emit("stopTyping", {
-        receiverId: otherUser._id,
         senderId: currentUserId,
         chatId: chat._id,
       });
+
+      if (isPendingMessageRequest) {
+        setRequestMessageSent(true);
+      }
 
       setReplyingTo(null);
       onMessageSent?.();
@@ -380,12 +609,12 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const handleTyping = (e) => {
     setMessage(e.target.value);
 
-    if (!socketRef.current || !otherUser?._id || !chat?._id) return;
+    if (!socketRef.current || !chat?._id || !currentUserId) return;
 
     const now = Date.now();
+
     if (now - lastTypingEmitTimeRef.current > 2000) {
       socketRef.current.emit("typing", {
-        receiverId: otherUser._id,
         senderId: currentUserId,
         senderName: getUserName(currentUser),
         chatId: chat._id,
@@ -393,11 +622,12 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
       lastTypingEmitTimeRef.current = now;
     }
 
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
 
     typingTimeoutRef.current = setTimeout(() => {
       socketRef.current?.emit("stopTyping", {
-        receiverId: otherUser._id,
         senderId: currentUserId,
         chatId: chat._id,
       });
@@ -420,7 +650,14 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   };
 
   const startVoiceRecording = async () => {
-    if (!chat?._id || !otherUser?._id) return;
+    if (!chat?._id || (!isGroupChat && !directReceiverId)) return;
+
+    if (isPendingMessageRequest) {
+      setNotice(
+        "Voice messages are available after the message request is accepted"
+      );
+      return;
+    }
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -471,9 +708,17 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
           const formData = new FormData();
           formData.append("chatId", chat._id);
-          formData.append("receiverId", otherUser._id);
+
+          if (!isGroupChat) {
+            formData.append("receiverId", directReceiverId);
+          }
+
           formData.append("audioDuration", duration);
-          formData.append("audio", audioBlob, `voice-${Date.now()}.webm`);
+          formData.append(
+            "audio",
+            audioBlob,
+            `voice-${Date.now()}.webm`
+          );
 
           const res = await api.post("/messages/voice", formData, {
             headers: {
@@ -486,7 +731,7 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
           setMessages((prev) => [...prev, savedMessage]);
 
           socketRef.current?.emit("sendMessage", {
-            receiverId: otherUser._id,
+            chatId: chat._id,
             message: savedMessage,
           });
 
@@ -567,26 +812,54 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
     });
   };
 
-  const openMessageMenu = (event, msg, isSent) => {
+  const openMessageMenu = (
+    event,
+    msg,
+    isSent
+  ) => {
     event.preventDefault();
-    openMessageMenuAt(event.clientX, event.clientY, msg, isSent);
+
+    if (
+      isSafetyMessageHiddenForMe(msg)
+    ) {
+      return;
+    }
+
+    openMessageMenuAt(
+      event.clientX,
+      event.clientY,
+      msg,
+      isSent
+    );
   };
 
   const closeMessageMenu = () => {
     setActiveMessageMenu(null);
   };
 
-  const handleLongPressStart = (event, msg, isSent) => {
-    const touch = event.touches?.[0];
+  const handleLongPressStart = (
+    event,
+    msg,
+    isSent
+  ) => {
+    if (
+      isSafetyMessageHiddenForMe(msg)
+    ) {
+      return;
+    }
 
-    longPressTimerRef.current = setTimeout(() => {
-      openMessageMenuAt(
-        touch?.clientX || 80,
-        touch?.clientY || 180,
-        msg,
-        isSent
-      );
-    }, 550);
+    const touch =
+      event.touches?.[0];
+
+    longPressTimerRef.current =
+      setTimeout(() => {
+        openMessageMenuAt(
+          touch?.clientX || 80,
+          touch?.clientY || 180,
+          msg,
+          isSent
+        );
+      }, 550);
   };
 
   const handleLongPressEnd = () => {
@@ -606,7 +879,7 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
   const emitUpdatedMessage = (updatedMessage) => {
     socketRef.current?.emit("messageUpdated", {
-      receiverId: otherUser._id,
+      chatId: chat?._id,
       message: updatedMessage,
     });
   };
@@ -703,27 +976,49 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
     try {
       setForwardLoading(true);
-      const res = await api.get("/users");
-      setForwardUsers(res.data || []);
+
+      const [usersResponse, chatsResponse] = await Promise.all([
+        api.get("/users"),
+        api.get("/chats"),
+      ]);
+
+      setForwardUsers(usersResponse.data || []);
+      setForwardGroups(
+        (chatsResponse.data || []).filter((item) => item.isGroupChat)
+      );
     } catch (error) {
-      console.error("Failed to load users:", error);
-      setNotice("Failed to load users");
+      console.error("Failed to load forward destinations:", error);
+      setNotice("Failed to load forward destinations");
     } finally {
       setForwardLoading(false);
     }
   };
 
-  const handleForwardToUser = async (user) => {
-    if (!forwardTarget || !user?._id) return;
+  const handleForwardToUser = async (destination) => {
+    if (!forwardTarget || !destination?._id) return;
 
     try {
       setForwardLoading(true);
 
-      const chatRes = await api.post("/chats", {
-        receiverId: user._id,
-      });
+      const isGroupDestination = Boolean(destination.isGroup);
+      let targetChat;
+      let receiverId = null;
 
-      const targetChat = chatRes.data;
+      if (isGroupDestination) {
+        targetChat = destination.chat;
+      } else {
+        receiverId = destination._id;
+
+        const chatRes = await api.post("/chats", {
+          receiverId,
+        });
+
+        targetChat = chatRes.data;
+      }
+
+      if (!targetChat?._id) {
+        throw new Error("Forward destination is unavailable");
+      }
 
       const messagesToForward =
         forwardTarget._id === "__multiple__"
@@ -731,15 +1026,22 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
           : [forwardTarget];
 
       const forwardedResponses = await Promise.all(
-        messagesToForward.map((msg) =>
-          api.post(`/messages/${msg._id}/forward`, {
+        messagesToForward.map((msg) => {
+          const payload = {
             chatId: targetChat._id,
-            receiverId: user._id,
-          })
-        )
+          };
+
+          if (!isGroupDestination) {
+            payload.receiverId = receiverId;
+          }
+
+          return api.post(`/messages/${msg._id}/forward`, payload);
+        })
       );
 
-      const forwardedMessages = forwardedResponses.map((res) => res.data);
+      const forwardedMessages = forwardedResponses.map(
+        (response) => response.data
+      );
 
       if (targetChat._id === chat?._id) {
         setMessages((prev) => {
@@ -754,7 +1056,7 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
       forwardedMessages.forEach((forwardedMessage) => {
         socketRef.current?.emit("sendMessage", {
-          receiverId: user._id,
+          chatId: targetChat._id,
           message: forwardedMessage,
         });
       });
@@ -770,7 +1072,11 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
       onMessageSent?.();
     } catch (error) {
       console.error("Failed to forward message:", error);
-      setNotice(error.response?.data?.message || "Failed to forward message");
+      setNotice(
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to forward message"
+      );
     } finally {
       setForwardLoading(false);
     }
@@ -888,6 +1194,111 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
       setNotice(error.response?.data?.message || "Failed to delete for me");
     }
   };
+
+  const handleRevealSafetyMessage =
+    async (msg) => {
+      if (!msg?._id) return;
+
+      try {
+        const response =
+          await api.patch(
+            `/messages/${msg._id}/reveal`
+          );
+
+        updateMessageInState(
+          response.data
+        );
+        setNotice(
+          "Message revealed"
+        );
+      } catch (error) {
+        console.error(
+          "Failed to reveal message:",
+          error
+        );
+
+        setNotice(
+          error.response?.data
+            ?.message ||
+            "Failed to reveal message"
+        );
+      }
+    };
+
+  const handleDeleteSafetyMessage =
+    async (msg) => {
+      if (!msg?._id) return;
+
+      try {
+        await api.patch(
+          `/messages/${msg._id}/delete-for-me`
+        );
+
+        setMessages((previous) =>
+          previous.filter(
+            (item) =>
+              item._id !== msg._id
+          )
+        );
+
+        setNotice(
+          "Message deleted"
+        );
+        onMessageSent?.();
+      } catch (error) {
+        console.error(
+          "Failed to delete safety message:",
+          error
+        );
+
+        setNotice(
+          error.response?.data
+            ?.message ||
+            "Failed to delete message"
+        );
+      }
+    };
+
+  const handleReportSafetyMessage =
+    async (msg) => {
+      if (!msg?._id) return;
+
+      const safety =
+        getSafetyMessageDetails(
+          msg.predictedCategory
+        );
+
+      try {
+        const response =
+          await api.patch(
+            `/messages/${msg._id}/flag`,
+            {
+              flagCategory:
+                safety.reportCategory,
+              flagReason:
+                `Reported from SafeChat AI ${msg.predictedCategory} warning`,
+            }
+          );
+
+        updateMessageInState(
+          response.data
+        );
+        setNotice(
+          "Message reported"
+        );
+      } catch (error) {
+        console.error(
+          "Failed to report safety message:",
+          error
+        );
+
+        setNotice(
+          error.response?.data
+            ?.message ||
+            "Failed to report message"
+        );
+      }
+    };
 
   const handleEmojiReaction = async (emoji) => {
     const msg = activeMessageMenu?.message;
@@ -1027,11 +1438,19 @@ const [profilePanelOpen, setProfilePanelOpen] = useState(false);
 
     try {
       setForwardLoading(true);
-      const res = await api.get("/users");
-      setForwardUsers(res.data || []);
+
+      const [usersResponse, chatsResponse] = await Promise.all([
+        api.get("/users"),
+        api.get("/chats"),
+      ]);
+
+      setForwardUsers(usersResponse.data || []);
+      setForwardGroups(
+        (chatsResponse.data || []).filter((item) => item.isGroupChat)
+      );
     } catch (error) {
-      console.error("Failed to load users:", error);
-      setNotice("Failed to load users");
+      console.error("Failed to load forward destinations:", error);
+      setNotice("Failed to load forward destinations");
     } finally {
       setForwardLoading(false);
     }
@@ -1074,10 +1493,10 @@ const handleClearCurrentChat = async () => {
 };
 
 const handleBlockCurrentChat = async () => {
-  if (!otherUser?._id) return;
+  if (isGroupChat || !directReceiverId) return;
 
   try {
-    const res = await api.post(`/users/toggle-block/${otherUser._id}`);
+    const res = await api.post(`/users/toggle-block/${directReceiverId}`);
     sessionStorage.setItem("user", JSON.stringify(res.data));
     window.dispatchEvent(new Event("userUpdated"));
     setNotice("Block setting updated");
@@ -1104,11 +1523,28 @@ const handleDeleteCurrentChat = async () => {
   }
 };
 
-const handleUnfriendUser = async () => {
-  if (!otherUser?._id) return;
+const handleExitCurrentGroup = async () => {
+  if (!chat?._id || !isGroupChat) return;
 
   try {
-    const res = await api.post(`/users/remove-friend`, { friendId: otherUser._id });
+    await api.patch(`/chats/${chat._id}/exit-group`);
+    setProfilePanelOpen(false);
+    setNotice("Exited group");
+    onMessageSent?.();
+    window.location.href = "/app";
+  } catch (error) {
+    console.error("Failed to exit group:", error);
+    setNotice(error.response?.data?.message || "Failed to exit group");
+  }
+};
+
+const handleUnfriendUser = async () => {
+  if (isGroupChat || !directReceiverId) return;
+
+  try {
+    await api.post(`/users/remove-friend`, {
+      friendId: directReceiverId,
+    });
     setNotice("User removed from friends");
     setProfilePanelOpen(false);
     // Reload UI state via custom event or socket
@@ -1116,6 +1552,47 @@ const handleUnfriendUser = async () => {
   } catch (error) {
     console.error("Failed to unfriend user:", error);
     setNotice(error.response?.data?.message || "Failed to unfriend user");
+  }
+};
+
+const handleAcceptMessageRequest = async () => {
+  if (!chat?._id || !isMessageRequestRecipient) return;
+
+  try {
+    setRequestActionLoading(true);
+    const response = await api.patch(
+      `/chats/${chat._id}/message-request/accept`
+    );
+
+    setMessageRequestStatus("accepted");
+    setRequestMessageSent(Boolean(response.data?.requestMessageSent));
+    setNotice("Conversation started");
+    onMessageSent?.();
+  } catch (error) {
+    console.error("Failed to accept message request:", error);
+    setNotice(
+      error.response?.data?.message || "Failed to accept message request"
+    );
+  } finally {
+    setRequestActionLoading(false);
+  }
+};
+
+const handleDeleteMessageRequest = async () => {
+  if (!chat?._id || !isPendingMessageRequest) return;
+
+  try {
+    setRequestActionLoading(true);
+    await api.delete(`/chats/${chat._id}/message-request`);
+    setNotice("Message request deleted");
+    onChatDeleted?.(chat._id);
+  } catch (error) {
+    console.error("Failed to delete message request:", error);
+    setNotice(
+      error.response?.data?.message || "Failed to delete message request"
+    );
+  } finally {
+    setRequestActionLoading(false);
   }
 };
 
@@ -1141,13 +1618,27 @@ const handleUnfriendUser = async () => {
   }
 
   const isOtherUserOnline =
+    !isGroupChat &&
     onlineUsers.includes(otherUser?._id) &&
     otherUser?.privacy?.lastSeen !== "Nobody";
-  const displayOtherUser = { ...otherUser, isOnline: isOtherUserOnline };
 
-  const isBlockedByMe = currentUser?.blockedContacts?.some(
-    (contact) => (contact._id || contact).toString() === otherUser?._id?.toString()
-  );
+  const displayOtherUser = isGroupChat
+    ? {
+        ...otherUser,
+        name: chatDisplayName,
+        username: chatDisplayName,
+        isGroup: true,
+        isOnline: false,
+      }
+    : { ...otherUser, isOnline: isOtherUserOnline };
+
+  const isBlockedByMe =
+    !isGroupChat &&
+    currentUser?.blockedContacts?.some(
+      (contact) =>
+        (contact._id || contact).toString() ===
+        otherUser?._id?.toString()
+    );
 
   const deleteTargetSenderId =
     typeof deleteTarget?.senderId === "object"
@@ -1158,11 +1649,27 @@ const handleUnfriendUser = async () => {
     deleteTargetSenderId?.toString() === currentUserId?.toString() &&
     !deleteTarget?.isDeleted;
 
-  const filteredForwardUsers = forwardUsers.filter((user) => {
-    const text = `${getUserName(user)} ${user.email || ""}`.toLowerCase();
+  const forwardDestinations = [
+    ...forwardGroups.map((groupChat) => ({
+      _id: groupChat._id,
+      name: groupChat.groupName || "Group chat",
+      username: groupChat.groupName || "Group chat",
+      email: `${groupChat.members?.length || 0} members`,
+      isGroup: true,
+      chat: groupChat,
+    })),
+    ...forwardUsers,
+  ];
+
+  const filteredForwardUsers = forwardDestinations.filter((destination) => {
+    const text = `${getUserName(destination)} ${
+      destination.email || ""
+    }`.toLowerCase();
     const q = forwardSearch.trim().toLowerCase();
 
-    if (isSameId(user._id, currentUserId)) return false;
+    if (!destination.isGroup && isSameId(destination._id, currentUserId)) {
+      return false;
+    }
 
     if (!q) return true;
 
@@ -1181,24 +1688,29 @@ const handleUnfriendUser = async () => {
     type="button"
     onClick={() => setProfilePanelOpen(true)}
     className="flex-1 min-w-0 flex items-center gap-3 text-left rounded-[24px] px-2 py-2 -ml-2 hover:bg-slate-50/80 transition"
-    title="Open contact info"
+    title={isGroupChat ? "Open group info" : "Open contact info"}
   >
     <Avatar user={displayOtherUser} />
 
     <div className="min-w-0">
       <h2 className="font-black text-lg text-slate-950 truncate">
-        {getUserName(otherUser)}
+        {chatDisplayName}
       </h2>
 
       <div className="flex items-center gap-2 text-sm text-slate-500">
-        <span
-          className={`w-2 h-2 rounded-full ${
-            isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
-          }`}
-        />
+        {!isGroupChat && (
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
+            }`}
+          />
+        )}
         <span className="truncate">
-          {isOtherUserOnline ? "Online" : "Offline"}
-          {otherUser?.username ? ` • @${otherUser.username}` : ""}
+          {isGroupChat
+            ? `${chatMemberCount} member${chatMemberCount === 1 ? "" : "s"}`
+            : `${isOtherUserOnline ? "Online" : "Offline"}${
+                otherUser?.username ? ` • @${otherUser.username}` : ""
+              }`}
         </span>
       </div>
     </div>
@@ -1274,6 +1786,26 @@ const handleUnfriendUser = async () => {
               const reactionSummary = getReactionSummary(msg.reactions);
               const isPinned = isCurrentUserInList(msg.pinnedBy);
               const isStarred = isCurrentUserInList(msg.starredBy);
+              const safetyHiddenForCurrentUser =
+                isSafetyMessageHiddenForMe(
+                  msg
+                );
+              const safetyDetails =
+                getSafetyMessageDetails(
+                  msg.predictedCategory
+                );
+              const confidencePercent =
+                Number.isFinite(
+                  Number(
+                    msg.classificationConfidence
+                  )
+                )
+                  ? Math.round(
+                      Number(
+                        msg.classificationConfidence
+                      ) * 100
+                    )
+                  : null;
 
               return (
                 <div
@@ -1302,6 +1834,12 @@ const handleUnfriendUser = async () => {
                       isSent ? "items-end" : "items-start"
                     }`}
                   >
+                    {isGroupChat && !isSent && isFirstInGroup && (
+                      <div className="px-2 pb-1 text-xs font-black text-[#6366F1]">
+                        {getUserName(msg.senderId)}
+                      </div>
+                    )}
+
                     <div
                       onClick={() => handleBubbleClick(msg)}
                       onContextMenu={(event) =>
@@ -1336,7 +1874,7 @@ const handleUnfriendUser = async () => {
                             }`
                       } ${isSelected ? "ring-2 ring-emerald-400/60 bg-emerald-50/40" : ""}`}
                     >
-                      {!msg.isDeleted && msg.replyTo && (
+                      {!safetyHiddenForCurrentUser && !msg.isDeleted && msg.replyTo && (
                         <div className="mb-2 px-3 py-2 rounded-[14px] bg-white/20 border-l-2 border-white/60 text-xs opacity-85 max-w-[260px]">
                           <div className="font-black mb-0.5">Replying to</div>
                           <div className="truncate">
@@ -1345,13 +1883,94 @@ const handleUnfriendUser = async () => {
                         </div>
                       )}
 
-                      {!msg.isDeleted && msg.isForwarded && (
+                      {!safetyHiddenForCurrentUser && !msg.isDeleted && msg.isForwarded && (
                         <div className="mb-1 text-xs opacity-70 font-bold">
                           Forwarded
                         </div>
                       )}
 
-                      {msg.isDeleted ? (
+                      {safetyHiddenForCurrentUser ? (
+                        <div
+                          className="min-w-[260px] max-w-[340px]"
+                          onClick={(event) =>
+                            event.stopPropagation()
+                          }
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                              <ShieldAlert
+                                size={19}
+                              />
+                            </span>
+
+                            <div className="min-w-0">
+                              <div className="font-black text-slate-950">
+                                {
+                                  safetyDetails.title
+                                }
+                              </div>
+
+                              <div className="mt-1 text-sm leading-5 text-slate-600">
+                                {
+                                  safetyDetails.description
+                                }
+                              </div>
+
+                              <div className="mt-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                                SafeChat AI
+                                {confidencePercent !==
+                                null
+                                  ? ` · ${confidencePercent}% confidence`
+                                  : ""}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleRevealSafetyMessage(
+                                  msg
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-full bg-[#6366F1] px-3 py-2 text-xs font-black text-white"
+                            >
+                              <Eye
+                                size={15}
+                              />
+                              View message
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteSafetyMessage(
+                                  msg
+                                )
+                              }
+                              className="rounded-full border border-red-200 bg-white px-3 py-2 text-xs font-black text-red-600 hover:bg-red-50"
+                            >
+                              Delete
+                            </button>
+
+                            {msg.predictedCategory !==
+                              "spam" && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleReportSafetyMessage(
+                                    msg
+                                  )
+                                }
+                                className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50"
+                              >
+                                Report
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ) : msg.isDeleted ? (
                         "This message was deleted"
                       ) : msg.messageType === "voice" && msg.audioUrl ? (
                         <div className="min-w-[230px]">
@@ -1370,6 +1989,23 @@ const handleUnfriendUser = async () => {
                       ) : (
                         msg.text
                       )}
+
+                      {!safetyHiddenForCurrentUser &&
+                        !msg.isDeleted &&
+                        msg.classificationStatus ===
+                          "classified" &&
+                        msg.predictedCategory &&
+                        msg.predictedCategory !==
+                          "normal" && (
+                          <div className="mt-2 text-[11px] font-black uppercase tracking-wide opacity-70">
+                            AI:{" "}
+                            {msg.predictedCategory}
+                            {confidencePercent !==
+                            null
+                              ? ` · ${confidencePercent}%`
+                              : ""}
+                          </div>
+                        )}
 
                       {!msg.isDeleted && (isPinned || isStarred) && (
                         <div className="mt-1 flex gap-1 text-xs opacity-75">
@@ -1436,7 +2072,7 @@ const handleUnfriendUser = async () => {
                   <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
                 </div>
                 <div className="mt-1 px-1 text-xs text-slate-400">
-                  {getUserName(otherUser)} is typing...
+                  {typingUserName || chatDisplayName} is typing...
                 </div>
               </div>
             </div>
@@ -1460,7 +2096,7 @@ const handleUnfriendUser = async () => {
       </button>
 
       <h3 className="text-lg font-black text-slate-950 flex-1">
-        Contact info
+        {isGroupChat ? "Group info" : "Contact info"}
       </h3>
 
       <button
@@ -1473,19 +2109,29 @@ const handleUnfriendUser = async () => {
 
     <div className="flex-1 overflow-y-auto">
       <div className="px-6 pt-8 pb-7 flex flex-col items-center text-center border-b border-slate-100">
-        <div className="w-28 h-28 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#6366F1] text-white flex items-center justify-center text-4xl font-black shadow-[0_18px_42px_rgba(99,102,241,0.25)]">
-          {initials(getUserName(otherUser))}
+        <div className="w-28 h-28 rounded-full bg-gradient-to-br from-[#8B5CF6] to-[#6366F1] text-white flex items-center justify-center text-4xl font-black shadow-[0_18px_42px_rgba(99,102,241,0.25)] overflow-hidden">
+          {!isGroupChat && otherUser?.profilePic ? (
+            <img
+              src={otherUser.profilePic}
+              alt={chatDisplayName}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            initials(chatDisplayName)
+          )}
         </div>
 
         <h2 className="mt-4 text-2xl font-black text-slate-950">
-          {getUserName(otherUser)}
+          {chatDisplayName}
         </h2>
 
         <p className="mt-1 text-sm text-slate-500">
-          {otherUser?.email || "No email"}
+          {isGroupChat
+            ? `${chatMemberCount} member${chatMemberCount === 1 ? "" : "s"}`
+            : otherUser?.email || "No email"}
         </p>
 
-        {otherUser?.username && (
+        {!isGroupChat && otherUser?.username && (
           <p className="mt-1 text-sm font-bold text-slate-500">
             @{otherUser.username}
           </p>
@@ -1525,19 +2171,51 @@ const handleUnfriendUser = async () => {
       </div>
 
       <div className="px-6 py-5 border-b border-slate-100">
-        <div className="rounded-[22px] bg-slate-50 border border-slate-200 p-4">
-          <div className="text-xs font-black uppercase tracking-wide text-slate-400 mb-1">
-            Status
+        {isGroupChat ? (
+          <div className="rounded-[22px] bg-slate-50 border border-slate-200 p-4">
+            <div className="text-xs font-black uppercase tracking-wide text-slate-400 mb-3">
+              Members
+            </div>
+
+            <div className="space-y-3">
+              {(chat?.members || []).map((member) => (
+                <div
+                  key={member?._id || member}
+                  className="flex items-center gap-3"
+                >
+                  <Avatar user={member} />
+                  <div className="min-w-0">
+                    <div className="text-sm font-black text-slate-800 truncate">
+                      {getUserName(member)}
+                      {isSameId(member?._id || member, currentUserId)
+                        ? " (you)"
+                        : ""}
+                    </div>
+                    <div className="text-xs text-slate-500 truncate">
+                      {member?.username
+                        ? `@${member.username}`
+                        : member?.email || ""}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
-              }`}
-            />
-            {isOtherUserOnline ? "Online" : "Offline"}
+        ) : (
+          <div className="rounded-[22px] bg-slate-50 border border-slate-200 p-4">
+            <div className="text-xs font-black uppercase tracking-wide text-slate-400 mb-1">
+              Status
+            </div>
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isOtherUserOnline ? "bg-emerald-400" : "bg-slate-300"
+                }`}
+              />
+              {isOtherUserOnline ? "Online" : "Offline"}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="px-6 py-5 border-b border-slate-100">
@@ -1590,6 +2268,17 @@ const handleUnfriendUser = async () => {
         <UserMinus className="text-red-400 group-hover:text-red-600 dark:group-hover:text-red-500" size={20} />
       </button>
     </>
+  )}
+
+  {isGroupChat && (
+    <button
+      type="button"
+      onClick={handleExitCurrentGroup}
+      className="w-full py-4 flex items-center gap-5 text-left border-b border-slate-100 text-red-600 hover:bg-red-50 rounded-[14px] px-2"
+    >
+      <LogOut size={24} />
+      <span className="font-bold">Exit group</span>
+    </button>
   )}
 
   <button
@@ -1843,7 +2532,7 @@ const handleUnfriendUser = async () => {
             <input
               value={forwardSearch}
               onChange={(event) => setForwardSearch(event.target.value)}
-              placeholder="Search users"
+              placeholder="Search people or groups"
               className="apple-input w-full h-11 rounded-full px-4 text-slate-900 placeholder:text-slate-400 mb-3"
               autoFocus
             />
@@ -1855,7 +2544,7 @@ const handleUnfriendUser = async () => {
                 </div>
               ) : filteredForwardUsers.length === 0 ? (
                 <div className="py-8 text-center text-slate-400 font-bold">
-                  No users found
+                  No destinations found
                 </div>
               ) : (
                 filteredForwardUsers.map((user) => (
@@ -1965,12 +2654,68 @@ const handleUnfriendUser = async () => {
           isSelectionMode ? "hidden" : ""
         }`}
       >
-        {isBlockedByMe ? (
+        {isPendingMessageRequest && isMessageRequestRecipient ? (
+          <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-4">
+            <div className="font-black text-slate-950">
+              {chatDisplayName} is not your friend
+            </div>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Do you want to accept this message request and start the
+              conversation?
+            </p>
+
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                disabled={requestActionLoading}
+                onClick={handleAcceptMessageRequest}
+                className="flex-1 h-11 rounded-full bg-[#6366F1] text-white font-black disabled:opacity-60"
+              >
+                {requestActionLoading ? "Please wait..." : "Accept"}
+              </button>
+
+              <button
+                type="button"
+                disabled={requestActionLoading}
+                onClick={handleDeleteMessageRequest}
+                className="flex-1 h-11 rounded-full bg-white border border-red-200 text-red-600 font-black hover:bg-red-50 disabled:opacity-60"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ) : isPendingMessageRequest &&
+          isMessageRequestSender &&
+          requestMessageSent ? (
+          <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-center">
+            <div className="font-black text-slate-950">
+              Message request sent
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              You can continue chatting after {chatDisplayName} accepts it.
+            </p>
+            <button
+              type="button"
+              disabled={requestActionLoading}
+              onClick={handleDeleteMessageRequest}
+              className="mt-3 px-4 py-2 rounded-full text-sm font-black text-red-600 hover:bg-red-50 disabled:opacity-60"
+            >
+              Cancel request
+            </button>
+          </div>
+        ) : isBlockedByMe ? (
           <div className="flex items-center justify-center p-2 text-slate-500 font-medium">
             You have blocked this user. Unblock to send a message.
           </div>
         ) : (
           <>
+            {isPendingMessageRequest && isMessageRequestSender && (
+              <div className="mb-2 mx-2 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-slate-600">
+                You can send one message. More messages will be enabled after
+                {` ${chatDisplayName} `}accepts the request.
+              </div>
+            )}
+
             {replyingTo && (
               <div className="mb-2 mx-12 rounded-[18px] bg-white border border-slate-200 shadow-sm px-4 py-2 flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -2008,7 +2753,11 @@ const handleUnfriendUser = async () => {
               <div className="relative flex-1">
                 <input
                   type="text"
-                  placeholder={`Message ${getUserName(otherUser)}`}
+                  placeholder={
+                    isPendingMessageRequest
+                      ? "Send one message request"
+                      : `Message ${chatDisplayName}`
+                  }
                   value={message}
                   onChange={handleTyping}
                   className="apple-input w-full h-12 rounded-full pl-5 pr-12 text-slate-900 placeholder:text-slate-400"
@@ -2054,8 +2803,9 @@ const handleUnfriendUser = async () => {
               ) : (
                 <button
                   type="button"
+                  disabled={isPendingMessageRequest}
                   onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
-                  className={`h-11 rounded-full flex items-center justify-center transition-all ${
+                  className={`h-11 rounded-full flex items-center justify-center transition-all disabled:opacity-40 ${
                     isRecording
                       ? "w-28 bg-red-50 text-red-500 font-black text-xs"
                       : "w-11 text-[#6366F1] hover:bg-[#F0EDFF]"

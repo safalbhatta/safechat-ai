@@ -1,6 +1,8 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const { createNotification } = require("../services/notificationService");
+const fs = require("fs");
+const path = require("path");
 
 const getUsers = async (req, res) => {
   try {
@@ -449,6 +451,98 @@ const toggleBlockUser = async (req, res) => {
   }
 };
 
+
+const buildProfilePayload = (user) => ({
+  _id: user._id,
+  name: user.name,
+  username: user.username,
+  email: user.email,
+  bio: user.bio,
+  profilePic: user.profilePic,
+  privacy: user.privacy,
+  blockedContacts: user.blockedContacts,
+});
+
+const removePreviousLocalProfilePicture = (profilePic) => {
+  try {
+    if (!profilePic) return;
+
+    const marker = "/uploads/profile-pictures/";
+    const markerIndex = profilePic.indexOf(marker);
+
+    if (markerIndex === -1) return;
+
+    const filename = path.basename(profilePic.slice(markerIndex + marker.length));
+    const filePath = path.join(
+      __dirname,
+      "..",
+      "uploads",
+      "profile-pictures",
+      filename
+    );
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (error) {
+    console.error("Failed to remove old profile picture:", error.message);
+  }
+};
+
+const uploadProfilePicture = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Please choose an image" });
+    }
+
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const previousProfilePic = user.profilePic;
+    const profilePic = `${req.protocol}://${req.get(
+      "host"
+    )}/uploads/profile-pictures/${req.file.filename}`;
+
+    user.profilePic = profilePic;
+    await user.save();
+
+    removePreviousLocalProfilePicture(previousProfilePic);
+
+    const updatedUser = await User.findById(user._id).populate(
+      "blockedContacts",
+      "name username bio profilePic"
+    );
+
+    const payload = buildProfilePayload(updatedUser);
+    const io = req.app.get("io");
+
+    if (io) {
+      io.emit("userProfileUpdated", payload);
+    }
+
+    await createNotification({
+      io,
+      recipientId: updatedUser._id,
+      actorId: updatedUser._id,
+      type: "account",
+      title: "Profile picture updated",
+      body: "Your SafeChat profile picture was changed successfully.",
+      metadata: { action: "profile_picture_updated" },
+    });
+
+    res.json(payload);
+  } catch (error) {
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = { 
   getUsers, 
   searchUsers,
@@ -463,5 +557,6 @@ module.exports = {
   revokeSession, 
   toggleBlockUser,
   removeFriend,
-  getSuggestions
+  getSuggestions,
+  uploadProfilePicture
 };

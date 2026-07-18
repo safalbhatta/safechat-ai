@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   User,
@@ -18,7 +18,11 @@ import {
   Trash2,
   Key,
   ShieldCheck,
-  Laptop
+  Laptop,
+  Camera,
+  ImagePlus,
+  Loader2,
+  X
 } from "lucide-react";
 import API from "../lib/api";
 import { useSocket } from "../context/SocketContext";
@@ -144,7 +148,7 @@ function SelectOptionModal({ isOpen, onClose, title, options, selectedValue, onS
       <div className="w-full sm:max-w-sm bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-800 animate-in slide-in-from-bottom-10 sm:slide-in-from-bottom-0 duration-300" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <h3 className="text-lg font-bold text-[#101742] dark:text-slate-200">{title}</h3>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-[#101742] dark:text-slate-200 transition-colors font-bold">✕</button>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-[#101742] dark:text-slate-200 transition-colors font-bold">Ã¢Å“â€¢</button>
         </div>
         <div className="p-2">
           {options.map((opt) => (
@@ -183,6 +187,18 @@ function Toast({ message, type, onClose }) {
   );
 }
 
+function getInitials(name = "") {
+  return (
+    name
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "U"
+  );
+}
+
 export default function Settings() {
   const { socket } = useSocket();
   const navigate = useNavigate();
@@ -198,6 +214,15 @@ export default function Settings() {
 
   // --- ACCOUNT SETTINGS STATE ---
   const [accountForm, setAccountForm] = useState({ name: "", username: "", email: "", bio: "" });
+  const [profilePic, setProfilePic] = useState("");
+  const [isUploadingProfilePic, setIsUploadingProfilePic] = useState(false);
+  const galleryInputRef = useRef(null);
+  const cameraVideoRef = useRef(null);
+  const cameraCanvasRef = useRef(null);
+  const cameraStreamRef = useRef(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraError, setCameraError] = useState("");
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -252,6 +277,7 @@ export default function Settings() {
         email: savedUser.email || "",
         bio: savedUser.bio || ""
       });
+      setProfilePic(savedUser.profilePic || "");
       
       if (savedUser.privacy) {
         setPrivacySettings({ ...defaultPrivacy, ...savedUser.privacy });
@@ -306,6 +332,193 @@ export default function Settings() {
       bio: savedUser.bio || ""
     });
     showToast("Changes discarded", "success");
+  };
+
+  const handleProfilePictureSelected = async (file) => {
+    if (!file) return;
+
+    if (!file.type?.startsWith("image/")) {
+      showToast("Please select an image file.", "error");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("Profile picture must be smaller than 5 MB.", "error");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("profilePic", file);
+
+    try {
+      setIsUploadingProfilePic(true);
+
+      const response = await API.post("/users/profile-picture", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      const updatedUser = response.data;
+      setProfilePic(updatedUser.profilePic || "");
+      sessionStorage.setItem("user", JSON.stringify(updatedUser));
+      window.dispatchEvent(new Event("userUpdated"));
+      showToast("Profile picture updated successfully!", "success");
+    } catch (error) {
+      console.error("Profile picture upload failed:", error);
+      showToast(
+        error.response?.data?.message || "Failed to upload profile picture.",
+        "error"
+      );
+    } finally {
+      setIsUploadingProfilePic(false);
+
+      if (galleryInputRef.current) {
+        galleryInputRef.current.value = "";
+      }
+    }
+  };
+
+
+  const stopCameraStream = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+  };
+
+  const closeCamera = () => {
+    stopCameraStream();
+    setCameraOpen(false);
+    setCameraStarting(false);
+    setCameraError("");
+  };
+
+  useEffect(() => {
+    if (!cameraOpen) return undefined;
+
+    let cancelled = false;
+
+    const startCamera = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError("Camera access is not supported in this browser.");
+        return;
+      }
+
+      try {
+        setCameraStarting(true);
+        setCameraError("");
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 1280 },
+          },
+          audio: false,
+        });
+
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        cameraStreamRef.current = stream;
+
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          await cameraVideoRef.current.play().catch(() => {});
+        }
+      } catch (error) {
+        console.error("Camera could not be opened:", error);
+        setCameraError(
+          error?.name === "NotAllowedError"
+            ? "Camera permission was denied. Allow camera access and try again."
+            : "The camera could not be opened on this device."
+        );
+      } finally {
+        if (!cancelled) {
+          setCameraStarting(false);
+        }
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      cancelled = true;
+      stopCameraStream();
+    };
+  }, [cameraOpen]);
+
+  const handleOpenCamera = () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast("Camera access is not supported in this browser.", "error");
+      return;
+    }
+
+    setCameraError("");
+    setCameraOpen(true);
+  };
+
+  const handleCaptureProfilePicture = () => {
+    const video = cameraVideoRef.current;
+    const canvas = cameraCanvasRef.current;
+
+    if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
+      setCameraError("The camera is still starting. Try again in a moment.");
+      return;
+    }
+
+    const size = Math.min(video.videoWidth, video.videoHeight);
+    const sourceX = Math.max(0, (video.videoWidth - size) / 2);
+    const sourceY = Math.max(0, (video.videoHeight - size) / 2);
+
+    canvas.width = 900;
+    canvas.height = 900;
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      setCameraError("The picture could not be captured.");
+      return;
+    }
+
+    context.drawImage(
+      video,
+      sourceX,
+      sourceY,
+      size,
+      size,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setCameraError("The picture could not be captured.");
+          return;
+        }
+
+        const file = new File(
+          [blob],
+          `profile-camera-${Date.now()}.jpg`,
+          { type: "image/jpeg" }
+        );
+
+        closeCamera();
+        handleProfilePictureSelected(file);
+      },
+      "image/jpeg",
+      0.9
+    );
   };
 
   const handleSaveAccount = async () => {
@@ -471,6 +684,68 @@ export default function Settings() {
               </CardHeader>
 
               <CardContent className="space-y-4">
+                <div className="rounded-3xl border border-indigo-100 bg-indigo-50/55 dark:bg-indigo-950/20 dark:border-indigo-900/40 p-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+                    <div className="w-24 h-24 rounded-full overflow-hidden bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] text-white flex items-center justify-center text-3xl font-black shadow-[0_14px_34px_rgba(99,102,241,0.25)] shrink-0">
+                      {profilePic ? (
+                        <img
+                          src={profilePic}
+                          alt="Profile"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        getInitials(accountForm.name || accountForm.username)
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-black text-[#101742] dark:text-slate-100">
+                        Profile picture
+                      </h4>
+                      <p className="text-sm text-[#64748b] dark:text-slate-400 mt-1">
+                        Add a photo using your camera or choose one from your gallery.
+                      </p>
+
+                      <div className="flex flex-wrap gap-2 mt-4">
+                        <button
+                          type="button"
+                          disabled={isUploadingProfilePic}
+                          onClick={() => galleryInputRef.current?.click()}
+                          className="h-11 px-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[#101742] dark:text-slate-100 font-black flex items-center gap-2 hover:border-[#6366F1] disabled:opacity-60"
+                        >
+                          {isUploadingProfilePic ? (
+                            <Loader2 size={18} className="animate-spin" />
+                          ) : (
+                            <ImagePlus size={18} />
+                          )}
+                          Gallery
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isUploadingProfilePic}
+                          onClick={handleOpenCamera}
+                          className="h-11 px-4 rounded-2xl bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] text-white font-black flex items-center gap-2 shadow-[0_10px_24px_rgba(99,102,241,0.22)] disabled:opacity-60"
+                        >
+                          <Camera size={18} />
+                          Camera
+                        </button>
+                      </div>
+
+                      <input
+                        ref={galleryInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) =>
+                          handleProfilePictureSelected(event.target.files?.[0])
+                        }
+                      />
+
+                    </div>
+                  </div>
+                </div>
+
                 <TextInput label="Full Name" name="name" value={accountForm.name} onChange={handleAccountChange} placeholder="e.g. Alex Johnson" />
                 <TextInput label="Username" name="username" value={accountForm.username} onChange={handleAccountChange} placeholder="e.g. alex" />
                 <TextInput label="Email Address" name="email" value={accountForm.email} disabled={true} />
@@ -751,7 +1026,7 @@ export default function Settings() {
                       >
                         <div>
                           <p className="font-bold text-[#101742] dark:text-slate-200">{user.name}</p>
-                          <p className="text-xs text-[#64748b] dark:text-slate-400">{user.username} • {user.bio}</p>
+                          <p className="text-xs text-[#64748b] dark:text-slate-400">{user.username} Ã¢â‚¬Â¢ {user.bio}</p>
                         </div>
                         <Button 
                           variant="outline" 
@@ -787,10 +1062,10 @@ export default function Settings() {
                   className="w-full px-4 py-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl text-[#101742] dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#6366F1]/25 font-bold transition-all"
                 >
                   <option>English</option>
-                  <option>Spanish (Español)</option>
-                  <option>French (Français)</option>
+                  <option>Spanish (EspaÃƒÂ±ol)</option>
+                  <option>French (FranÃƒÂ§ais)</option>
                   <option>German (Deutsch)</option>
-                  <option>Nepali (नेपाली)</option>
+                  <option>Nepali (Ã Â¤Â¨Ã Â¥â€¡Ã Â¤ÂªÃ Â¤Â¾Ã Â¤Â²Ã Â¥â‚¬)</option>
                 </select>
               </div>
 
@@ -853,7 +1128,7 @@ export default function Settings() {
                             )}
                           </div>
                           <p className="text-xs text-[#64748b] dark:text-slate-400 mt-1">
-                            Browser: {session.browser} • IP: {session.ip}
+                            Browser: {session.browser} Ã¢â‚¬Â¢ IP: {session.ip}
                           </p>
                           <p className="text-xs text-[#64748b] dark:text-slate-400 mt-0.5">
                             Last Active: {new Date(session.lastActive).toLocaleString()}
@@ -945,6 +1220,100 @@ export default function Settings() {
         onSelect={(val) => handlePrivacyChange(modalConfig.field, val)}
       />
 
+      {/* REAL CAMERA MODAL */}
+      {cameraOpen && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4"
+          onClick={closeCamera}
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden rounded-[28px] border border-white/20 bg-white dark:bg-slate-900 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-black text-[#101742] dark:text-slate-100">
+                  Take profile picture
+                </h3>
+                <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                  This opens the camera directly, not the gallery.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeCamera}
+                className="w-10 h-10 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Close camera"
+              >
+                <X size={21} />
+              </button>
+            </div>
+
+            <div className="p-5">
+              <div className="relative aspect-square overflow-hidden rounded-[24px] bg-slate-950">
+                <video
+                  ref={cameraVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="h-full w-full object-cover -scale-x-100"
+                />
+
+                {cameraStarting && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 text-white">
+                    <Loader2 size={30} className="animate-spin" />
+                    <span className="mt-3 text-sm font-bold">
+                      Opening camera...
+                    </span>
+                  </div>
+                )}
+
+                {cameraError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-950/85 p-6 text-center">
+                    <div>
+                      <AlertTriangle
+                        size={30}
+                        className="mx-auto text-amber-400"
+                      />
+                      <p className="mt-3 text-sm font-bold leading-6 text-white">
+                        {cameraError}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <canvas ref={cameraCanvasRef} className="hidden" />
+
+              <div className="mt-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={closeCamera}
+                  className="flex-1 h-12 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 font-black"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  disabled={
+                    cameraStarting ||
+                    Boolean(cameraError) ||
+                    isUploadingProfilePic
+                  }
+                  onClick={handleCaptureProfilePicture}
+                  className="flex-1 h-12 rounded-2xl bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] text-white font-black flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <Camera size={19} />
+                  Capture
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DELETE CONFIRMATION MODAL */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -991,7 +1360,7 @@ export default function Settings() {
       >
         <div className="flex items-center justify-between mb-6 pt-2">
           <h2 className="text-xl font-black px-3 text-[#101742] dark:text-slate-100">Settings</h2>
-          <button onClick={() => setShowSidebar(false)} className="md:hidden p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-500 dark:text-slate-300 transition-colors">✕</button>
+          <button onClick={() => setShowSidebar(false)} className="md:hidden p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-500 dark:text-slate-300 transition-colors">Ã¢Å“â€¢</button>
         </div>
 
         <nav className="space-y-1">

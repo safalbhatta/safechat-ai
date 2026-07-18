@@ -149,8 +149,16 @@ export default function Contacts() {
         <div className="flex items-start justify-between mb-4 w-full">
           <div className="flex items-center gap-4 flex-1 min-w-0">
             <div className="relative shrink-0">
-              <div className="w-14 h-14 rounded-[20px] bg-gradient-to-br from-[#6366F1] via-[#8B5CF6] to-[#06B6D4] text-white flex items-center justify-center text-xl font-black shadow-lg">
-                {initials(getUserName(user))}
+              <div className="w-14 h-14 rounded-[20px] bg-gradient-to-br from-[#6366F1] via-[#8B5CF6] to-[#06B6D4] text-white flex items-center justify-center text-xl font-black shadow-lg overflow-hidden">
+                {user.profilePic ? (
+                  <img
+                    src={user.profilePic}
+                    alt={getUserName(user)}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  initials(getUserName(user))
+                )}
               </div>
               <span className={`absolute -right-1 -bottom-1 w-4 h-4 rounded-full border-2 border-white ${user.isOnline ? "bg-emerald-400" : "bg-slate-300"}`} />
             </div>
@@ -438,8 +446,16 @@ export default function Contacts() {
                 return (
                   <div key={user._id} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 group border border-transparent hover:border-slate-100 transition-colors">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#6366F1] to-[#06B6D4] text-white flex items-center justify-center font-black">
-                        {initials(getUserName(user))}
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#6366F1] to-[#06B6D4] text-white flex items-center justify-center font-black overflow-hidden">
+                        {user.profilePic ? (
+                          <img
+                            src={user.profilePic}
+                            alt={getUserName(user)}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          initials(getUserName(user))
+                        )}
                       </div>
                       <div className="flex-1 min-w-0 pr-2">
                         <div className="font-black text-slate-950 truncate">{getUserName(user)}</div>

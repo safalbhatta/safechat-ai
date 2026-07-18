@@ -137,6 +137,8 @@ export default function ConversationList({
   const [newFriendSuggestions, setNewFriendSuggestions] = useState([]);
   const [isSearchingFriend, setIsSearchingFriend] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [peopleSearchResults, setPeopleSearchResults] = useState([]);
+  const [isSearchingPeople, setIsSearchingPeople] = useState(false);
 
   const selectedChatIdRef = useRef(selectedChatId);
 
@@ -237,11 +239,13 @@ export default function ConversationList({
     globalSocket.on("userProfileUpdated", loadData);
     globalSocket.on("friendRequestReceived", loadData);
     globalSocket.on("friendRequestAccepted", loadData);
+    globalSocket.on("chat:changed", loadData);
 
     return () => {
       globalSocket.off("userProfileUpdated", loadData);
       globalSocket.off("friendRequestReceived", loadData);
       globalSocket.off("friendRequestAccepted", loadData);
+      globalSocket.off("chat:changed", loadData);
     };
   }, [loadData, reloadKey, globalSocket]);
 
@@ -302,6 +306,37 @@ export default function ConversationList({
 
     return () => clearTimeout(timer);
   }, [panelMode, newFriendSearch]);
+
+  useEffect(() => {
+    if (panelMode !== "newChat") {
+      setPeopleSearchResults([]);
+      setIsSearchingPeople(false);
+      return;
+    }
+
+    const query = searchQuery.trim();
+
+    if (query.length < 2) {
+      setPeopleSearchResults([]);
+      setIsSearchingPeople(false);
+      return;
+    }
+
+    setIsSearchingPeople(true);
+
+    const timer = setTimeout(() => {
+      api
+        .get(`/users/search?query=${encodeURIComponent(query)}`)
+        .then((response) => setPeopleSearchResults(response.data || []))
+        .catch((error) => {
+          console.error("People search failed:", error);
+          setPeopleSearchResults([]);
+        })
+        .finally(() => setIsSearchingPeople(false));
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [panelMode, searchQuery]);
 
   useEffect(() => {
     const closeMenu = () => {
@@ -384,7 +419,16 @@ export default function ConversationList({
           }
         }
 
-        if (!chat.lastMessage && !chat.isGroupChat) {
+        const isOutgoingPendingRequest =
+          !chat.isGroupChat &&
+          chat.requestStatus === "pending" &&
+          isSameId(getId(chat.initiatedBy), currentUserId);
+
+        if (
+          !chat.lastMessage &&
+          !chat.isGroupChat &&
+          !isOutgoingPendingRequest
+        ) {
           return false;
         }
 
@@ -429,6 +473,18 @@ export default function ConversationList({
     });
   }, [sortedFriends, searchQuery]);
 
+  const newChatPeople = useMemo(() => {
+    const query = searchQuery.trim();
+
+    if (query.length >= 2) {
+      return peopleSearchResults.filter(
+        (user) => !isSameId(user._id, currentUserId)
+      );
+    }
+
+    return sortedFriends;
+  }, [searchQuery, peopleSearchResults, sortedFriends, currentUserId]);
+
   const updateChatInState = (updatedChat) => {
     if (!updatedChat?._id) return;
 
@@ -452,6 +508,8 @@ export default function ConversationList({
     setGroupName("");
     setNewFriendSearch("");
     setNewFriendResults([]);
+    setPeopleSearchResults([]);
+    setIsSearchingPeople(false);
   };
 
   const openNewChatFlow = () => {
@@ -472,6 +530,8 @@ export default function ConversationList({
     setPanelMode("newFriend");
     setNewFriendSearch("");
     setNewFriendResults([]);
+    setPeopleSearchResults([]);
+    setIsSearchingPeople(false);
   };
 
   const handleBack = () => {
@@ -962,7 +1022,7 @@ export default function ConversationList({
             <input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search name or username"
+              placeholder="Search anyone by name, username, or email"
               className="apple-input w-full h-12 rounded-full pl-11 pr-4 text-slate-900 placeholder:text-slate-400"
             />
           </div>
@@ -994,18 +1054,30 @@ export default function ConversationList({
           </button>
 
           <div className="px-3 pt-5 pb-2 text-xs font-black uppercase tracking-wide text-slate-400">
-            Friends
+            {searchQuery.trim().length >= 2 ? "People" : "Friends"}
           </div>
 
-          {filteredUsers.length === 0 ? (
+          {isSearchingPeople ? (
+            <div className="py-8 flex items-center justify-center text-slate-400 gap-2 font-bold">
+              <Loader2 size={18} className="animate-spin" />
+              Searching people...
+            </div>
+          ) : newChatPeople.length === 0 ? (
             <div className="px-4 py-8 text-sm text-slate-400 text-center font-bold">
-              No friends found.
+              {searchQuery.trim().length >= 2
+                ? "No registered users found."
+                : "No friends found. Search above to message anyone."}
             </div>
           ) : (
-            filteredUsers.map((user) =>
+            newChatPeople.map((user) =>
               renderUserListRow({
                 user,
                 onClick: () => handleStartChat(user),
+                rightContent: (
+                  <span className="px-3 py-1.5 rounded-full bg-[#F0EDFF] text-[#6366F1] text-xs font-black">
+                    Message
+                  </span>
+                ),
               })
             )
           )}
@@ -1435,6 +1507,14 @@ export default function ConversationList({
                   const avatarUser = getChatAvatarUser(chat);
                   const title = getChatTitle(chat);
                   const unread = chat.unreadCount > 0 || chat.isUnreadMarked;
+                  const isPendingRequest =
+                    !chat.isGroupChat && chat.requestStatus === "pending";
+                  const isIncomingRequest =
+                    isPendingRequest &&
+                    isSameId(getId(chat.requestRecipient), currentUserId);
+                  const isOutgoingRequest =
+                    isPendingRequest &&
+                    isSameId(getId(chat.initiatedBy), currentUserId);
 
                   return (
                     <button
@@ -1452,9 +1532,16 @@ export default function ConversationList({
 
                         <div className="flex-1 min-w-0 border-b border-slate-200/60 pb-3">
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <h3 className="font-black truncate text-slate-950">
-                              {title}
-                            </h3>
+                            <div className="min-w-0 flex items-center gap-2">
+                              <h3 className="font-black truncate text-slate-950">
+                                {title}
+                              </h3>
+                              {isPendingRequest && (
+                                <span className="shrink-0 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-black uppercase tracking-wide">
+                                  Request
+                                </span>
+                              )}
+                            </div>
 
                             <div className="flex items-center gap-2">
                               {chat.isPinned && <span className="text-xs">📌</span>}
@@ -1491,10 +1578,21 @@ export default function ConversationList({
                                       : "text-slate-500"
                                   }
                                 >
-                                  {chat.lastMessage ||
-                                    (chat.isGroupChat
-                                      ? `${chat.members?.length || 0} members`
-                                      : "No messages yet")}
+                                  {isIncomingRequest
+                                    ? `Message request · ${
+                                        chat.lastMessage || "New message"
+                                      }`
+                                    : isOutgoingRequest &&
+                                      !chat.requestMessageSent
+                                    ? "Send one message request"
+                                    : isOutgoingRequest
+                                    ? `Request pending · ${
+                                        chat.lastMessage || "Message sent"
+                                      }`
+                                    : chat.lastMessage ||
+                                      (chat.isGroupChat
+                                        ? `${chat.members?.length || 0} members`
+                                        : "No messages yet")}
                                 </span>
                               )}
                             </p>

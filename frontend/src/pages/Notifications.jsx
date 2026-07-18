@@ -153,6 +153,12 @@ export default function Notifications() {
   }, [notificationPreferences, preferencesOpen]);
 
   useEffect(() => {
+    markAllNotificationsRead().catch((error) => {
+      console.error("Failed to clear notification badge:", error);
+    });
+  }, [markAllNotificationsRead]);
+
+  useEffect(() => {
     const timer = setTimeout(async () => {
       try {
         setLoading(true);
@@ -211,7 +217,10 @@ export default function Notifications() {
 
     const chatId = notification.chatId?._id || notification.chatId;
 
-    if ((notification.type === "message" || notification.type === "reaction") && chatId) {
+    if (
+      chatId &&
+      ["message", "reaction", "system"].includes(notification.type)
+    ) {
       navigate(`/app?chat=${chatId}`);
       return;
     }
@@ -423,8 +432,18 @@ export default function Notifications() {
                   }`}
                 >
                   <div className="relative shrink-0">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#8B5CF6] to-[#6366F1] text-white flex items-center justify-center font-black shadow-[0_10px_24px_rgba(99,102,241,0.20)]">
-                      {notification.actorId ? initials(actorName) : <Icon size={22} />}
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#8B5CF6] to-[#6366F1] text-white flex items-center justify-center font-black shadow-[0_10px_24px_rgba(99,102,241,0.20)] overflow-hidden">
+                      {notification.actorId?.profilePic ? (
+                        <img
+                          src={notification.actorId.profilePic}
+                          alt={actorName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : notification.actorId ? (
+                        initials(actorName)
+                      ) : (
+                        <Icon size={22} />
+                      )}
                     </div>
                     <span className="absolute -right-1 -bottom-1 w-6 h-6 rounded-lg bg-white border border-slate-200 text-indigo-600 flex items-center justify-center shadow-sm">
                       <Icon size={13} />

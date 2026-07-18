@@ -14,6 +14,7 @@ const {
   togglePinMessage,
   toggleStarMessage,
   reactToMessage,
+  revealSafetyMessage,
   flagMessage,
   getFlaggedSummary,
   getFlaggedMessages,
@@ -65,6 +66,7 @@ router.post("/:messageId/forward", protect, forwardMessage);
 router.patch("/:messageId/toggle-pin", protect, togglePinMessage);
 router.patch("/:messageId/toggle-star", protect, toggleStarMessage);
 router.patch("/:messageId/reaction", protect, reactToMessage);
+router.patch("/:messageId/reveal", protect, revealSafetyMessage);
 router.patch("/:messageId/flag", protect, flagMessage);
 router.patch("/:messageId/flag-status", protect, updateFlagStatus);
 

@@ -21,7 +21,7 @@ const navItems = [
 export default function MobileNav() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { notificationUnreadCount } = useSocket();
+  const { notificationUnreadCount, markAllNotificationsRead } = useSocket();
 
   return (
     <nav className="md:hidden fixed bottom-3 left-3 right-3 z-50 rounded-[28px] bg-white/82 backdrop-blur-2xl border border-white/80 shadow-[0_20px_60px_rgba(15,23,42,0.14)] px-2 py-2">
@@ -36,7 +36,17 @@ export default function MobileNav() {
           return (
             <button
               key={item.path}
-              onClick={() => navigate(item.path)}
+              onClick={async () => {
+                if (item.path === "/app/notifications") {
+                  try {
+                    await markAllNotificationsRead();
+                  } catch (error) {
+                    console.error("Failed to clear notification badge:", error);
+                  }
+                }
+
+                navigate(item.path);
+              }}
               className={`h-[54px] rounded-2xl flex flex-col items-center justify-center gap-1 ${
                 isActive
                   ? "apple-primary"
@@ -59,4 +69,3 @@ export default function MobileNav() {
     </nav>
   );
 }
-
