@@ -1,6 +1,6 @@
 {
   "model_name": "SBERT + Logistic Regression",
-  "model_version": "sbert-logreg-v1",
+  "model_version": "sbert-logreg-v2-shortfix-20260718",
   "sbert_model_name": "sentence-transformers/all-MiniLM-L6-v2",
   "embedding_dimension": 384,
   "normalize_embeddings": true,
@@ -16,7 +16,40 @@
     "abusive",
     "hateful"
   ],
-  "created_at": "2026-07-18T06:40:39.827075+00:00",
+  "safety_threshold_used_for_evaluation": 0.55,
+  "created_at": "2026-07-18T10:56:35.203553+00:00",
   "sklearn_version": "1.6.1",
-  "sentence_transformers_version": "5.6.0"
+  "sentence_transformers_version": "5.6.0",
+  "dataset_path": "/content/drive/MyDrive/message_dataset_cleaning/20260718_102341/FinalData_ShortFixed.csv",
+  "dataset_rows": 20249,
+  "training_rows": 16145,
+  "held_out_test_rows": 5655,
+  "forced_short_training_rows": 1401,
+  "contextual_rows_added": 1500,
+  "best_c": 5.0,
+  "cross_validation_macro_f1": 0.903974257395757,
+  "held_out_test_metrics": {
+    "accuracy": 0.8887709991158267,
+    "macro_precision": 0.8881992476858604,
+    "macro_recall": 0.8881161316256666,
+    "macro_f1": 0.8881508445192474,
+    "weighted_f1": 0.888708452190186,
+    "argmax_normal_false_filter_rate": 0.06404269513008673,
+    "argmax_harmful_miss_rate": 0.02430221366698749,
+    "threshold_normal_hidden_rate": 0.04136090727151434,
+    "threshold_harmful_not_hidden_rate": 0.0712223291626564
+  },
+  "short_challenge_metrics": {
+    "accuracy": 0.9473684210526315,
+    "macro_f1": 0.9476190476190476,
+    "rows": 19
+  },
+  "smoke_test_passed": true,
+  "latency_summary_ms": {
+    "messages_tested": 100,
+    "average_ms": 6.126853280002251,
+    "median_ms": 6.015192500001376,
+    "minimum_ms": 5.557961999897998,
+    "maximum_ms": 8.245737999914127
+  }
 }
