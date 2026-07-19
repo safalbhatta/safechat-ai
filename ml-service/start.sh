@@ -26,5 +26,6 @@ if ! "$VENV_PYTHON" -c "import uvicorn" 2>/dev/null; then
     "$VENV_PYTHON" -m pip install -r requirements.txt
 fi
 
-echo "Starting SafeChat ML service on http://127.0.0.1:8001"
-"$VENV_PYTHON" -m uvicorn main:app --host 127.0.0.1 --port 8001
+ML_PORT="${PORT:-8001}"
+echo "Starting SafeChat ML service on 0.0.0.0:$ML_PORT"
+"$VENV_PYTHON" -m uvicorn main:app --host 0.0.0.0 --port "$ML_PORT"
