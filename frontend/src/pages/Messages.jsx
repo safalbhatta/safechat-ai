@@ -54,13 +54,15 @@ export default function Messages() {
           showConversationList ? "hidden md:flex" : "flex"
         } flex-1 min-w-0 flex-col`}
       >
-        <button
-          onClick={() => setShowConversationList(true)}
-          className="md:hidden h-12 px-4 bg-white/84 border-b border-slate-200 text-[#6366F1] font-black flex items-center gap-2"
-        >
-          <ArrowLeft size={19} />
-          Messages
-        </button>
+        <div className="md:hidden flex-none h-14 px-4 bg-white/90 backdrop-blur-md border-b border-slate-200 flex items-center shrink-0 z-10">
+          <button
+            onClick={() => setShowConversationList(true)}
+            className="text-[#6366F1] font-black flex items-center gap-2 active:opacity-70 transition-opacity"
+          >
+            <ArrowLeft size={22} strokeWidth={2.5} />
+            <span className="text-lg">Messages</span>
+          </button>
+        </div>
 
         <ChatArea
           chat={selectedChat}

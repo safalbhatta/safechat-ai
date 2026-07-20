@@ -120,13 +120,13 @@ export default function Layout() {
   }, [notificationPreferences]);
 
   return (
-    <div className="h-screen overflow-hidden p-4 md:p-5">
-      <div className="h-full flex gap-4">
+    <div className="h-[100dvh] overflow-hidden p-0 md:p-5">
+      <div className="h-full flex md:gap-4 pb-[85px] md:pb-0">
         <div className="hidden md:flex shrink-0">
           <Sidebar />
         </div>
 
-        <main className="apple-shell flex-1 min-w-0 overflow-hidden rounded-[34px]">
+        <main className="apple-shell flex-1 min-w-0 overflow-hidden rounded-none md:rounded-[34px] border-none md:border-solid md:border">
           <Outlet />
         </main>
       </div>

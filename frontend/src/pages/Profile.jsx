@@ -11,6 +11,7 @@ import {
   Settings,
   ShieldCheck,
   UserPlus,
+  LogOut,
 } from "lucide-react";
 import {
   Cell,
@@ -319,7 +320,7 @@ export default function Profile() {
             </p>
           </div>
 
-          <div className="flex gap-3 pb-2">
+          <div className="flex flex-wrap gap-3 pb-2">
             <button
               type="button"
               onClick={() =>
@@ -344,6 +345,19 @@ export default function Profile() {
                 size={17}
               />
               Messages
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                sessionStorage.removeItem("token");
+                sessionStorage.removeItem("user");
+                navigate("/login", { replace: true });
+              }}
+              className="md:hidden flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-600 transition hover:bg-red-100 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400"
+            >
+              <LogOut size={17} />
+              Log Out
             </button>
           </div>
         </div>
