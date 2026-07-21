@@ -1,8 +1,10 @@
 import gradio as gr
+import spaces
 from main import app as fastapi_app
 
 # Hugging Face Gradio SDK requires a Gradio interface.
-# We create a simple dummy UI just to satisfy Hugging Face.
+# ZeroGPU requires at least one function to be decorated with @spaces.GPU
+@spaces.GPU
 def check_status():
     return "✅ SafeChat ML Service is running in the background via FastAPI!"
 
