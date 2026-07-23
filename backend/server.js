@@ -46,6 +46,16 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/analytics", analyticsRoutes);
 
+// Keep the Render ML service awake by pinging it every 10 minutes
+const mlServiceUrl = process.env.ML_SERVICE_URL || "http://127.0.0.1:8001";
+if (mlServiceUrl.includes("onrender.com")) {
+  setInterval(() => {
+    fetch(`${mlServiceUrl.replace(/\/+$/, "")}/health`)
+      .then(() => console.log("Pinged ML service to keep it awake"))
+      .catch(() => {});
+  }, 10 * 60 * 1000); // 10 minutes
+}
+
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -285,7 +295,7 @@ const checkImageKitConnection = async () => {
   const { IMAGEKIT_PUBLIC_KEY, IMAGEKIT_PRIVATE_KEY, IMAGEKIT_URL_ENDPOINT } = process.env;
 
   if (!IMAGEKIT_PUBLIC_KEY || !IMAGEKIT_PRIVATE_KEY || !IMAGEKIT_URL_ENDPOINT ||
-      IMAGEKIT_PUBLIC_KEY === "your_public_key") {
+    IMAGEKIT_PUBLIC_KEY === "your_public_key") {
     console.warn("⚠️  ImageKit: credentials not configured in .env — skipping check");
     return;
   }
